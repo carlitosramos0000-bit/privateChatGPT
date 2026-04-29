@@ -25,12 +25,24 @@ const ADMIN_USERNAME = "ramoscv";
 const ADMIN_PASSWORD = "Logica!1";
 const MODES = ["assistant", "code", "image"];
 const REQUEST_MODES = ["auto", ...MODES];
+const IMAGE_EDIT_INTENT_PATTERNS = [
+  /\bedita(?:r)?\b/,
+  /\bedit\b/,
+  /\baltera(?:r)?\b/,
+  /\bretoca(?:r)?\b/,
+  /\bmelhora(?:r)?\b/,
+  /\bremove(?:r)?\b/,
+  /\bsubstitui(?:r)?\b/,
+  /\btroca(?:r)?\b/,
+  /\bultima\s+imagem\b/,
+  /\bultimo\s+render\b/,
+];
 
 const DEFAULT_SETTINGS = {
   assistantName: "Private ChatGPT Pro",
   defaultModel: "gpt-5.5",
   codeModel: "gpt-5.5",
-  imageOutputModel: "gpt-image-2",
+  imageOutputModel: "dall-e-3",
   systemPrompt:
     "You are a precise, helpful, production-grade assistant. Respond clearly, structure complex answers well, and stay practical.",
   codeSystemPrompt:
@@ -39,8 +51,8 @@ const DEFAULT_SETTINGS = {
     "Generate or edit highly realistic, polished images by default unless the user explicitly asks for another style. Preserve important identity, composition, and product details when editing reference images.",
   reasoningEffort: "medium",
   maxOutputTokens: 4000,
-  imageSize: "1536x1024",
-  imageQuality: "high",
+  imageSize: "1024x1024",
+  imageQuality: "hd",
   openAiApiKeyEncrypted: null,
   updatedAt: new Date().toISOString(),
 };
@@ -184,6 +196,30 @@ function normalizeStateShape(state) {
 
   if (!state.settings.imageSystemPrompt) {
     mergedSettings.imageSystemPrompt = DEFAULT_SETTINGS.imageSystemPrompt;
+    changed = true;
+  }
+
+  const normalizedImageOutputModel = normalizeImageModelIdentifier(mergedSettings.imageOutputModel);
+  if (mergedSettings.imageOutputModel !== normalizedImageOutputModel) {
+    mergedSettings.imageOutputModel = normalizedImageOutputModel;
+    changed = true;
+  }
+
+  const normalizedImageSize = normalizeImageSizeForModel(
+    mergedSettings.imageSize,
+    mergedSettings.imageOutputModel,
+  );
+  if (mergedSettings.imageSize !== normalizedImageSize) {
+    mergedSettings.imageSize = normalizedImageSize;
+    changed = true;
+  }
+
+  const normalizedImageQuality = normalizeImageQualityForModel(
+    mergedSettings.imageQuality,
+    mergedSettings.imageOutputModel,
+  );
+  if (mergedSettings.imageQuality !== normalizedImageQuality) {
+    mergedSettings.imageQuality = normalizedImageQuality;
     changed = true;
   }
 
@@ -525,12 +561,14 @@ async function handleApi(req, res, url, method) {
 
     const body = await readJsonBody(req);
     const incomingApiKey = String(body.openAiApiKey || "").trim();
+    const nextImageOutputModel =
+      normalizeImageModelIdentifier(body.imageOutputModel) ||
+      normalizeImageModelIdentifier(appState.settings.imageOutputModel);
     const nextSettings = {
       assistantName: String(body.assistantName || "").trim() || appState.settings.assistantName,
       defaultModel: String(body.defaultModel || "").trim() || appState.settings.defaultModel,
       codeModel: String(body.codeModel || "").trim() || appState.settings.codeModel,
-      imageOutputModel:
-        String(body.imageOutputModel || "").trim() || appState.settings.imageOutputModel,
+      imageOutputModel: nextImageOutputModel,
       systemPrompt:
         String(body.systemPrompt || "").trim() || appState.settings.systemPrompt,
       codeSystemPrompt:
@@ -539,8 +577,14 @@ async function handleApi(req, res, url, method) {
         String(body.imageSystemPrompt || "").trim() || appState.settings.imageSystemPrompt,
       reasoningEffort: validateReasoningEffort(body.reasoningEffort),
       maxOutputTokens: validateMaxOutputTokens(body.maxOutputTokens),
-      imageSize: validateImageSize(body.imageSize),
-      imageQuality: validateImageQuality(body.imageQuality),
+      imageSize: normalizeImageSizeForModel(
+        String(body.imageSize || "").trim() || appState.settings.imageSize,
+        nextImageOutputModel,
+      ),
+      imageQuality: normalizeImageQualityForModel(
+        String(body.imageQuality || "").trim() || appState.settings.imageQuality,
+        nextImageOutputModel,
+      ),
       updatedAt: new Date().toISOString(),
     };
 
@@ -696,10 +740,11 @@ async function serveStatic(res, pathname) {
   const ext = path.extname(filePath).toLowerCase();
   const contentType = getContentType(ext);
   const file = await fs.readFile(filePath);
+  const shouldDisableCache = [".html", ".css", ".js"].includes(ext);
 
   res.writeHead(200, {
     "Content-Type": contentType,
-    "Cache-Control": ext === ".html" ? "no-cache" : "public, max-age=3600",
+    "Cache-Control": shouldDisableCache ? "no-store" : "public, max-age=3600",
   });
   res.end(file);
 }
@@ -1269,22 +1314,50 @@ function buildInstructionsForMode(mode) {
 async function requestImageResponse({ chat, text, attachments }) {
   const apiKey = getOpenAiApiKey();
   const prompt = buildImagePrompt(text, attachments);
+  const imageModel = normalizeImageModelIdentifier(
+    appState.settings.imageOutputModel || DEFAULT_SETTINGS.imageOutputModel,
+  );
+  const imageModelConfig = getImageModelConfig(imageModel);
   const liveReferences = collectEditableImageReferences(attachments);
-  const historyReferences = liveReferences.length
-    ? []
-    : await getRecentImageReferences(chat.id, MAX_HISTORY_IMAGE_REFERENCES);
-  const references = [...liveReferences, ...historyReferences].slice(0, MAX_HISTORY_IMAGE_REFERENCES);
+  const wantsEdit = shouldEditImageRequest(text, attachments);
 
-  const imageResult = references.length
-    ? await requestImageEdit({
-        apiKey,
-        prompt,
-        references,
-      })
-    : await requestImageGeneration({
-        apiKey,
-        prompt,
-      });
+  let action = "generate";
+  let references = [];
+
+  if (liveReferences.length || wantsEdit) {
+    if (!imageModelConfig.supportsEdits) {
+      throw new Error(
+        `O modelo de imagem atual (${imageModel}) gera imagens novas mas nao suporta edicao direta. Para editar imagens, muda para dall-e-2 ou verifica a organizacao e usa um modelo GPT Image.`,
+      );
+    }
+
+    const historyReferences = liveReferences.length
+      ? []
+      : await getRecentImageReferences(chat.id, MAX_HISTORY_IMAGE_REFERENCES);
+    references = [...liveReferences, ...historyReferences].slice(0, MAX_HISTORY_IMAGE_REFERENCES);
+
+    if (!references.length) {
+      throw new Error(
+        "Nao encontrei uma imagem anterior ou anexo de imagem para editar nesta conversa.",
+      );
+    }
+
+    action = "edit";
+  }
+
+  const imageResult =
+    action === "edit"
+      ? await requestImageEdit({
+          apiKey,
+          prompt,
+          references,
+          model: imageModel,
+        })
+      : await requestImageGeneration({
+          apiKey,
+          prompt,
+          model: imageModel,
+        });
 
   const savedAttachment = await saveGeneratedImageAttachment(chat.id, {
     imageBase64: imageResult.imageBase64,
@@ -1293,7 +1366,7 @@ async function requestImageResponse({ chat, text, attachments }) {
 
   const textSummary = buildImageResultSummary({
     prompt,
-    action: references.length ? "edit" : "generate",
+    action,
     revisedPrompt: imageResult.revisedPrompt,
   });
 
@@ -1301,7 +1374,7 @@ async function requestImageResponse({ chat, text, attachments }) {
     text: textSummary,
     attachments: [savedAttachment],
     responseId: null,
-    model: appState.settings.imageOutputModel || DEFAULT_SETTINGS.imageOutputModel,
+    model: imageModel,
     usage: imageResult.usage || null,
   };
 }
@@ -1374,16 +1447,41 @@ function isEditableImageMimeType(mimeType) {
   return ["image/png", "image/jpeg", "image/jpg", "image/webp"].includes(mimeType);
 }
 
-async function requestImageGeneration({ apiKey, prompt }) {
+function shouldEditImageRequest(text, attachments) {
+  const hasImageAttachment = attachments.some((attachment) =>
+    isEditableImageMimeType(String(attachment.type || attachment.mimeType || "").toLowerCase()),
+  );
+
+  if (hasImageAttachment) {
+    return true;
+  }
+
+  const lowered = String(text || "").toLowerCase();
+  return IMAGE_EDIT_INTENT_PATTERNS.some((pattern) => pattern.test(lowered));
+}
+
+async function requestImageGeneration({ apiKey, prompt, model }) {
+  const imageModel = normalizeImageModelIdentifier(model);
+  const imageConfig = getImageModelConfig(imageModel);
   const payload = {
-    model: appState.settings.imageOutputModel || DEFAULT_SETTINGS.imageOutputModel,
+    model: imageModel,
     prompt,
-    size: validateImageSize(appState.settings.imageSize),
-    quality: validateImageQuality(appState.settings.imageQuality),
-    output_format: "png",
+    size: normalizeImageSizeForModel(appState.settings.imageSize, imageModel),
   };
 
-  const response = await callOpenAiJson({
+  const normalizedQuality = normalizeImageQualityForModel(appState.settings.imageQuality, imageModel);
+  if (shouldSendImageQuality(imageModel, normalizedQuality)) {
+    payload.quality = normalizedQuality;
+  }
+
+  if (imageConfig.family === "gpt-image") {
+    payload.output_format = "png";
+  } else {
+    payload.response_format = "b64_json";
+    payload.n = 1;
+  }
+
+  const response = await callOpenAiImageJsonWithFallback({
     apiKey,
     endpoint: "https://api.openai.com/v1/images/generations",
     payload,
@@ -1402,20 +1500,35 @@ async function requestImageGeneration({ apiKey, prompt }) {
   };
 }
 
-async function requestImageEdit({ apiKey, prompt, references }) {
+async function requestImageEdit({ apiKey, prompt, references, model }) {
+  const imageModel = normalizeImageModelIdentifier(model);
+  const imageConfig = getImageModelConfig(imageModel);
+  if (!imageConfig.supportsEdits) {
+    throw new Error(`O modelo ${imageModel} nao suporta edicao direta de imagens nesta app.`);
+  }
+
   const form = new FormData();
-  form.append("model", appState.settings.imageOutputModel || DEFAULT_SETTINGS.imageOutputModel);
+  form.append("model", imageModel);
   form.append("prompt", prompt);
-  form.append("size", validateImageSize(appState.settings.imageSize));
-  form.append("quality", validateImageQuality(appState.settings.imageQuality));
-  form.append("output_format", "png");
+  form.append("size", normalizeImageSizeForModel(appState.settings.imageSize, imageModel));
+
+  const normalizedQuality = normalizeImageQualityForModel(appState.settings.imageQuality, imageModel);
+  if (shouldSendImageQuality(imageModel, normalizedQuality)) {
+    form.append("quality", normalizedQuality);
+  }
+
+  if (imageConfig.family === "gpt-image") {
+    form.append("output_format", "png");
+  } else {
+    form.append("response_format", "b64_json");
+  }
 
   for (const reference of references) {
     const blob = new Blob([reference.buffer], { type: reference.mimeType });
     form.append("image", blob, reference.name);
   }
 
-  const response = await callOpenAiMultipart({
+  const response = await callOpenAiImageMultipartWithFallback({
     apiKey,
     endpoint: "https://api.openai.com/v1/images/edits",
     body: form,
@@ -1450,6 +1563,9 @@ function buildImageResultSummary({ action, revisedPrompt }) {
 function selectModelForMode(mode) {
   if (mode === "code") {
     return appState.settings.codeModel || DEFAULT_SETTINGS.codeModel;
+  }
+  if (mode === "image") {
+    return appState.settings.imageOutputModel || DEFAULT_SETTINGS.imageOutputModel;
   }
   return appState.settings.defaultModel || DEFAULT_SETTINGS.defaultModel;
 }
@@ -1519,6 +1635,48 @@ async function callOpenAiMultipart({ apiKey, endpoint, body }) {
   return data;
 }
 
+async function callOpenAiImageJsonWithFallback({ apiKey, endpoint, payload }) {
+  const nextPayload = { ...payload };
+
+  while (true) {
+    try {
+      return await callOpenAiJson({
+        apiKey,
+        endpoint,
+        payload: nextPayload,
+      });
+    } catch (error) {
+      const unsupportedParameter = extractUnknownParameterName(error);
+      if (!unsupportedParameter || !(unsupportedParameter in nextPayload)) {
+        throw error;
+      }
+
+      delete nextPayload[unsupportedParameter];
+    }
+  }
+}
+
+async function callOpenAiImageMultipartWithFallback({ apiKey, endpoint, body }) {
+  let currentBody = body;
+
+  while (true) {
+    try {
+      return await callOpenAiMultipart({
+        apiKey,
+        endpoint,
+        body: currentBody,
+      });
+    } catch (error) {
+      const unsupportedParameter = extractUnknownParameterName(error);
+      if (!unsupportedParameter || !hasFormDataField(currentBody, unsupportedParameter)) {
+        throw error;
+      }
+
+      currentBody = cloneFormDataWithoutField(currentBody, unsupportedParameter);
+    }
+  }
+}
+
 function normalizeOpenAiTransportError(error) {
   if (error?.cause?.code === "UNABLE_TO_GET_ISSUER_CERT_LOCALLY") {
     return new Error(
@@ -1539,6 +1697,43 @@ function extractOpenAiError(payload, fallback) {
     payload?.message ||
     fallback
   );
+}
+
+function extractUnknownParameterName(error) {
+  const message = String(error?.message || "");
+  const match = message.match(/Unknown parameter:\s*'([^']+)'/i);
+  return match?.[1] || null;
+}
+
+function hasFormDataField(form, fieldName) {
+  for (const [key] of form.entries()) {
+    if (key === fieldName) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function cloneFormDataWithoutField(form, fieldName) {
+  const nextForm = new FormData();
+  for (const [key, value] of form.entries()) {
+    if (key === fieldName) {
+      continue;
+    }
+
+    if (typeof value === "string") {
+      nextForm.append(key, value);
+      continue;
+    }
+
+    const filename = typeof value?.name === "string" ? value.name : undefined;
+    if (filename) {
+      nextForm.append(key, value, filename);
+    } else {
+      nextForm.append(key, value);
+    }
+  }
+  return nextForm;
 }
 
 function extractAssistantText(responsePayload) {
@@ -1576,15 +1771,97 @@ function validateMaxOutputTokens(value) {
 }
 
 function validateImageSize(value) {
-  return ["1024x1024", "1024x1536", "1536x1024", "auto"].includes(value)
-    ? value
-    : DEFAULT_SETTINGS.imageSize;
+  return normalizeImageSizeForModel(
+    value,
+    appState?.settings?.imageOutputModel || DEFAULT_SETTINGS.imageOutputModel,
+  );
 }
 
 function validateImageQuality(value) {
-  return ["low", "medium", "high", "auto"].includes(value)
-    ? value
-    : DEFAULT_SETTINGS.imageQuality;
+  return normalizeImageQualityForModel(
+    value,
+    appState?.settings?.imageOutputModel || DEFAULT_SETTINGS.imageOutputModel,
+  );
+}
+
+function normalizeImageModelIdentifier(value) {
+  return String(value || "").trim().toLowerCase() || DEFAULT_SETTINGS.imageOutputModel;
+}
+
+function getImageModelConfig(model) {
+  const family = getImageModelFamily(model);
+
+  if (family === "dall-e-3") {
+    return {
+      family,
+      supportsEdits: false,
+      supportedSizes: ["1024x1024", "1024x1536", "1536x1024"],
+      supportedQualities: ["standard", "hd"],
+      defaultSize: "1024x1024",
+      defaultQuality: "hd",
+    };
+  }
+
+  if (family === "dall-e-2") {
+    return {
+      family,
+      supportsEdits: true,
+      supportedSizes: ["1024x1024", "1024x1536", "1536x1024"],
+      supportedQualities: ["standard"],
+      defaultSize: "1024x1024",
+      defaultQuality: "standard",
+    };
+  }
+
+  return {
+    family: "gpt-image",
+    supportsEdits: true,
+    supportedSizes: ["1024x1024", "1024x1536", "1536x1024", "auto"],
+    supportedQualities: ["low", "medium", "high", "auto"],
+    defaultSize: "1536x1024",
+    defaultQuality: "high",
+  };
+}
+
+function getImageModelFamily(model) {
+  const normalized = normalizeImageModelIdentifier(model);
+  if (normalized.startsWith("dall-e-3")) {
+    return "dall-e-3";
+  }
+  if (normalized.startsWith("dall-e-2")) {
+    return "dall-e-2";
+  }
+  if (normalized === "chatgpt-image-latest" || normalized.startsWith("gpt-image")) {
+    return "gpt-image";
+  }
+  return "gpt-image";
+}
+
+function normalizeImageSizeForModel(value, model) {
+  const config = getImageModelConfig(model);
+  const normalized = String(value || "").trim().toLowerCase();
+  return config.supportedSizes.includes(normalized) ? normalized : config.defaultSize;
+}
+
+function normalizeImageQualityForModel(value, model) {
+  const config = getImageModelConfig(model);
+  const normalized = String(value || "").trim().toLowerCase();
+  return config.supportedQualities.includes(normalized)
+    ? normalized
+    : config.defaultQuality;
+}
+
+function shouldSendImageQuality(model, quality) {
+  const family = getImageModelFamily(model);
+  if (!quality) {
+    return false;
+  }
+
+  if (family === "dall-e-3") {
+    return false;
+  }
+
+  return true;
 }
 
 function normalizeImageExtension(format) {

@@ -420,6 +420,7 @@ function renderChatView() {
   const publicSettings = getPublicSettings();
   const effectiveAutoMode = detectAutoMode(state.composerText, state.composerAttachments);
   const visibleMode = state.composerMode === "auto" ? effectiveAutoMode : state.composerMode;
+  const imageModeNote = getImageModeNote(publicSettings.imageOutputModel);
 
   if (!state.activeChatId && state.chats.length === 0) {
     return `
@@ -524,7 +525,7 @@ function renderChatView() {
           </div>
 
           <div class="helper-text">
-            Suporta ate 4 anexos por mensagem. Para gerar HTML/CSS a partir de uma imagem, usa o modo <strong>Codigo</strong> ou deixa em <strong>Auto</strong>.
+            Suporta ate 4 anexos por mensagem. Para gerar HTML/CSS a partir de uma imagem, usa o modo <strong>Codigo</strong> ou deixa em <strong>Auto</strong>. ${escapeHtml(imageModeNote)}
           </div>
         </form>
       </div>
@@ -643,18 +644,20 @@ function renderSettingsView() {
     assistantName: APP_NAME,
     defaultModel: "gpt-5.5",
     codeModel: "gpt-5.5",
-    imageOutputModel: "gpt-image-2",
+    imageOutputModel: "dall-e-3",
     systemPrompt: "",
     codeSystemPrompt: "",
     imageSystemPrompt: "",
     reasoningEffort: "medium",
     maxOutputTokens: 4000,
-    imageSize: "1536x1024",
-    imageQuality: "high",
+    imageSize: "1024x1024",
+    imageQuality: "hd",
     maskedApiKey: "Nao definida",
     hasApiKey: false,
     ...(state.settings || {}),
   };
+  const imageModelProfile = getImageModelProfile(settings.imageOutputModel);
+  const imageModelHelper = getImageModelHelperText(settings.imageOutputModel);
 
   return `
     <div class="settings-grid">
@@ -662,7 +665,7 @@ function renderSettingsView() {
         <span class="hero-tag">Conta OpenAI e modos</span>
         <h2 class="section-title">Parametros da experiencia</h2>
         <p class="section-copy">
-          Sugestao atual baseada nas docs oficiais: <strong>gpt-5.5</strong> para assistente e codigo, e <strong>gpt-image-2</strong> para imagem realista.
+          Sugestao atual baseada nas docs oficiais: <strong>gpt-5.5</strong> para assistente e codigo, e <strong>dall-e-3</strong> como fallback compativel para geracao de imagem sem depender do bloqueio dos modelos GPT Image. Assim que a organizacao OpenAI estiver verificada, o mais robusto e voltar para um modelo GPT Image.
         </p>
 
         <form id="settings-form" class="stack">
@@ -681,7 +684,15 @@ function renderSettingsView() {
             </div>
             <div class="field">
               <label for="image-output-model">Modelo de imagem</label>
-              <input id="image-output-model" class="input" name="imageOutputModel" value="${escapeAttribute(settings.imageOutputModel)}" />
+              <input id="image-output-model" class="input" name="imageOutputModel" list="image-model-options" value="${escapeAttribute(settings.imageOutputModel)}" />
+              <datalist id="image-model-options">
+                <option value="dall-e-3"></option>
+                <option value="dall-e-2"></option>
+                <option value="gpt-image-2"></option>
+                <option value="gpt-image-1.5"></option>
+                <option value="gpt-image-1-mini"></option>
+              </datalist>
+              <div class="helper-text">${escapeHtml(imageModelHelper)}</div>
             </div>
             <div class="field">
               <label for="reasoning-effort">Esforco de raciocinio</label>
@@ -698,7 +709,7 @@ function renderSettingsView() {
             <div class="field">
               <label for="image-size">Tamanho da imagem</label>
               <select id="image-size" class="select" name="imageSize">
-                ${["1024x1024", "1024x1536", "1536x1024", "auto"].map((value) => `
+                ${imageModelProfile.sizes.map((value) => `
                   <option value="${value}" ${settings.imageSize === value ? "selected" : ""}>${value}</option>
                 `).join("")}
               </select>
@@ -706,7 +717,7 @@ function renderSettingsView() {
             <div class="field">
               <label for="image-quality">Qualidade da imagem</label>
               <select id="image-quality" class="select" name="imageQuality">
-                ${["low", "medium", "high", "auto"].map((value) => `
+                ${imageModelProfile.qualities.map((value) => `
                   <option value="${value}" ${settings.imageQuality === value ? "selected" : ""}>${value}</option>
                 `).join("")}
               </select>
@@ -894,9 +905,12 @@ function bindEvents() {
     });
 
     composerTextarea.addEventListener("keydown", (event) => {
-      if (event.ctrlKey && event.key === "Enter") {
+      const isEnterKey =
+        event.key === "Enter" || event.code === "Enter" || event.code === "NumpadEnter";
+
+      if (event.ctrlKey && isEnterKey) {
         event.preventDefault();
-        document.querySelector("#composer-form")?.requestSubmit();
+        submitComposerForm();
       }
     });
   }
@@ -959,6 +973,25 @@ function updateModeSummaryMeta() {
 
   const effective = detectAutoMode(state.composerText, state.composerAttachments);
   chatMeta.textContent = `Auto -> ${MODE_META[effective].label}`;
+}
+
+function submitComposerForm() {
+  const form = document.querySelector("#composer-form");
+  if (!form) {
+    return;
+  }
+
+  if (typeof form.requestSubmit === "function") {
+    form.requestSubmit();
+    return;
+  }
+
+  form.dispatchEvent(
+    new Event("submit", {
+      bubbles: true,
+      cancelable: true,
+    }),
+  );
 }
 
 async function handleLoginSubmit(event) {
@@ -1353,7 +1386,11 @@ function applyPreset(presetId, presetMode) {
 }
 
 function getPresetsForComposer() {
-  return PRESETS[state.composerMode] || PRESETS.auto;
+  const presets = PRESETS[state.composerMode] || PRESETS.auto;
+  if (state.composerMode === "image" && !supportsImageEditing(getPublicSettings().imageOutputModel)) {
+    return presets.filter((preset) => preset.id !== "image-edit");
+  }
+  return presets;
 }
 
 function getComposerPlaceholder(visibleMode, isAuto) {
@@ -1397,11 +1434,85 @@ function getPublicSettings() {
     assistantName: APP_NAME,
     defaultModel: "gpt-5.5",
     codeModel: "gpt-5.5",
-    imageOutputModel: "gpt-image-2",
-    imageQuality: "high",
-    imageSize: "1536x1024",
+    imageOutputModel: "dall-e-3",
+    imageQuality: "hd",
+    imageSize: "1024x1024",
     ...(state.settings || {}),
   };
+}
+
+function normalizeImageModelIdentifier(value) {
+  return String(value || "").trim().toLowerCase() || "dall-e-3";
+}
+
+function getImageModelFamily(model) {
+  const normalized = normalizeImageModelIdentifier(model);
+  if (normalized.startsWith("dall-e-3")) {
+    return "dall-e-3";
+  }
+  if (normalized.startsWith("dall-e-2")) {
+    return "dall-e-2";
+  }
+  if (normalized === "chatgpt-image-latest" || normalized.startsWith("gpt-image")) {
+    return "gpt-image";
+  }
+  return "gpt-image";
+}
+
+function getImageModelProfile(model) {
+  const family = getImageModelFamily(model);
+
+  if (family === "dall-e-3") {
+    return {
+      family,
+      supportsEdits: false,
+      sizes: ["1024x1024", "1024x1536", "1536x1024"],
+      qualities: ["standard", "hd"],
+    };
+  }
+
+  if (family === "dall-e-2") {
+    return {
+      family,
+      supportsEdits: true,
+      sizes: ["1024x1024", "1024x1536", "1536x1024"],
+      qualities: ["standard"],
+    };
+  }
+
+  return {
+    family: "gpt-image",
+    supportsEdits: true,
+    sizes: ["1024x1024", "1024x1536", "1536x1024", "auto"],
+    qualities: ["low", "medium", "high", "auto"],
+  };
+}
+
+function supportsImageEditing(model) {
+  return getImageModelProfile(model).supportsEdits;
+}
+
+function getImageModelHelperText(model) {
+  const normalized = normalizeImageModelIdentifier(model);
+  const profile = getImageModelProfile(normalized);
+
+  if (!profile.supportsEdits) {
+    return `O modelo atual (${normalized}) gera novas imagens e serve como fallback de compatibilidade. Para edicao direta ou para uma solucao mais duradoura, usa dall-e-2 ou um modelo GPT Image depois da verificacao da organizacao.`;
+  }
+
+  if (profile.family === "gpt-image") {
+    return `O modelo atual (${normalized}) suporta geracao e edicao, mas a OpenAI pode exigir verificacao da organizacao para os modelos GPT Image.`;
+  }
+
+  return `O modelo atual (${normalized}) suporta geracao e edicao de imagem.`;
+}
+
+function getImageModeNote(model) {
+  if (supportsImageEditing(model)) {
+    return "No modo Imagem, anexar uma imagem permite pedir uma edicao direta.";
+  }
+
+  return "No modo Imagem, o modelo atual gera imagens novas. Para editar uma imagem existente, muda o modelo de imagem para dall-e-2 ou GPT Image nas configuracoes.";
 }
 
 function resolveModelForMode(mode, settings = getPublicSettings()) {

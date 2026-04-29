@@ -4,16 +4,16 @@
     "assistantName": "Private ChatGPT Pro",
     "defaultModel": "gpt-5.5",
     "codeModel": "gpt-5.5",
-    "imageOutputModel": "gpt-image-2",
+    "imageOutputModel": "dall-e-3",
     "systemPrompt": "�?s um assistente útil, rigoroso e profissional. Responde de forma clara, organizada e com foco em ajudar o utilizador.",
     "codeSystemPrompt": "You are a senior software engineer. Produce production-ready code, explain tradeoffs briefly, and when the user supplies a screenshot or image, you can recreate the UI in semantic, accessible, responsive HTML and CSS without unnecessary frameworks unless asked.",
     "imageSystemPrompt": "Generate or edit highly realistic, polished images by default unless the user explicitly asks for another style. Preserve important identity, composition, and product details when editing reference images.",
     "reasoningEffort": "medium",
     "maxOutputTokens": 2200,
-    "imageSize": "1536x1024",
-    "imageQuality": "high",
+    "imageSize": "1024x1024",
+    "imageQuality": "standard",
     "openAiApiKeyEncrypted": "t7NTae0AOHdghGwb.GCV1F6KBtNEAN5idukdU5g.Fvhi3JIBtDVzrQChvWnDEAqYztjR-fgmYcZAM5tPORxPFJs_rpbIj5fVhyFOJPEM4sWlX791P_ms3iYtu80Nq3L8PNuuiccWPXYKhoyQ7iFpQ152aeZd9fS6sMnzpGRionYQUoCyvlDIk_bP9pB1bgS94RZymFW5Hdlz12BPQuaAWTdgn9RiasUWEGS5Yal8rOmu56bD1Uw3b8LDgAY_wk_8efU",
-    "updatedAt": "2026-04-29T09:56:10.906Z"
+    "updatedAt": "2026-04-29T10:46:32.135Z"
   },
   "users": [
     {
@@ -28,6 +28,310 @@
       "updatedAt": "2026-04-29T09:08:11.506Z"
     }
   ],
-  "chats": [],
-  "messages": []
+  "chats": [
+    {
+      "id": "4ae6c460-a415-4b8b-ae09-2ad13bed21d7",
+      "userId": "18ac0a56-de72-4a14-b1eb-14cdfd21cc1c",
+      "title": "Gera uma imagem ultra-realista, muito deta...",
+      "responseMemory": {
+        "assistant": null,
+        "code": null
+      },
+      "createdAt": "2026-04-29T10:24:13.430Z",
+      "updatedAt": "2026-04-29T10:39:56.825Z"
+    },
+    {
+      "id": "b1f80fd3-d3b0-47d0-b119-7f24e591d053",
+      "userId": "18ac0a56-de72-4a14-b1eb-14cdfd21cc1c",
+      "title": "Gera uma imagem ultra-realista, muito deta...",
+      "responseMemory": {
+        "assistant": null,
+        "code": null
+      },
+      "createdAt": "2026-04-29T10:37:59.993Z",
+      "updatedAt": "2026-04-29T10:44:04.983Z"
+    },
+    {
+      "id": "2d14d6ac-0718-453c-896b-94e2f90cdda6",
+      "userId": "18ac0a56-de72-4a14-b1eb-14cdfd21cc1c",
+      "title": "Gera uma imagem ultra-realista, muito deta...",
+      "responseMemory": {
+        "assistant": null,
+        "code": null
+      },
+      "createdAt": "2026-04-29T10:45:59.068Z",
+      "updatedAt": "2026-04-29T10:47:00.746Z"
+    }
+  ],
+  "messages": [
+    {
+      "id": "3593c745-6b3e-4a18-8c13-935664f5e188",
+      "chatId": "4ae6c460-a415-4b8b-ae09-2ad13bed21d7",
+      "role": "user",
+      "mode": "image",
+      "text": "Gera uma imagem ultra-realista, muito detalhada, com iluminacao natural, materiais crediveis e acabamento premium de um porco voador",
+      "attachments": [],
+      "status": "sent",
+      "createdAt": "2026-04-29T10:24:28.259Z",
+      "model": null,
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "d9c2f039-2f10-4c86-8f8f-50fce74fc8f3",
+      "chatId": "4ae6c460-a415-4b8b-ae09-2ad13bed21d7",
+      "role": "assistant",
+      "mode": "image",
+      "text": "Nao foi possivel concluir este pedido agora. Verifica a chave OpenAI, o modelo configurado e os limites disponiveis para esta funcionalidade.",
+      "attachments": [],
+      "status": "failed",
+      "createdAt": "2026-04-29T10:24:28.976Z",
+      "model": "gpt-5.5",
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "fbbf8d4b-0ff1-467a-ae4a-f9e803be3357",
+      "chatId": "4ae6c460-a415-4b8b-ae09-2ad13bed21d7",
+      "role": "user",
+      "mode": "image",
+      "text": "Gera uma imagem ultra-realista, com textura fina, materiais crediveis, profundidade natural e iluminacao premium.",
+      "attachments": [],
+      "status": "sent",
+      "createdAt": "2026-04-29T10:24:58.283Z",
+      "model": null,
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "43b74ba7-9569-4524-84f7-b86e96909884",
+      "chatId": "4ae6c460-a415-4b8b-ae09-2ad13bed21d7",
+      "role": "assistant",
+      "mode": "image",
+      "text": "Nao foi possivel concluir este pedido agora. Verifica a chave OpenAI, o modelo configurado e os limites disponiveis para esta funcionalidade.",
+      "attachments": [],
+      "status": "failed",
+      "createdAt": "2026-04-29T10:24:59.539Z",
+      "model": "gpt-5.5",
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "21f7ba1c-acb3-4785-b591-15311c9979dc",
+      "chatId": "4ae6c460-a415-4b8b-ae09-2ad13bed21d7",
+      "role": "user",
+      "mode": "image",
+      "text": "Cria um mockup fotorealista e elegante deste conceito/produto com enquadramento profissional.",
+      "attachments": [],
+      "status": "sent",
+      "createdAt": "2026-04-29T10:25:26.740Z",
+      "model": null,
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "e5db1053-ef42-4177-b31d-6b90a3c8c94c",
+      "chatId": "4ae6c460-a415-4b8b-ae09-2ad13bed21d7",
+      "role": "assistant",
+      "mode": "image",
+      "text": "Nao foi possivel concluir este pedido agora. Verifica a chave OpenAI, o modelo configurado e os limites disponiveis para esta funcionalidade.",
+      "attachments": [],
+      "status": "failed",
+      "createdAt": "2026-04-29T10:25:27.109Z",
+      "model": "gpt-5.5",
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "f6a37972-4183-4cfb-bcd4-30a8174400dc",
+      "chatId": "4ae6c460-a415-4b8b-ae09-2ad13bed21d7",
+      "role": "user",
+      "mode": "image",
+      "text": "Gera uma imagem ultra-realista, muito detalhada, com iluminacao natural, materiais crediveis e acabamento premium de um porco voador",
+      "attachments": [],
+      "status": "sent",
+      "createdAt": "2026-04-29T10:37:35.635Z",
+      "model": null,
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "42f767a6-7166-478a-8019-b2d78cde9c3d",
+      "chatId": "4ae6c460-a415-4b8b-ae09-2ad13bed21d7",
+      "role": "assistant",
+      "mode": "image",
+      "text": "Nao foi possivel concluir este pedido agora. Verifica a chave OpenAI, o modelo configurado e os limites disponiveis para esta funcionalidade.",
+      "attachments": [],
+      "status": "failed",
+      "createdAt": "2026-04-29T10:37:36.967Z",
+      "model": "gpt-5.5",
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "56e67ba2-e4d5-4d64-b046-326548eabe3a",
+      "chatId": "b1f80fd3-d3b0-47d0-b119-7f24e591d053",
+      "role": "user",
+      "mode": "image",
+      "text": "Gera uma imagem ultra-realista, muito detalhada, com iluminacao natural, materiais crediveis e acabamento premium de um porco voador",
+      "attachments": [],
+      "status": "sent",
+      "createdAt": "2026-04-29T10:38:54.389Z",
+      "model": null,
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "cc6913a6-917d-46de-86dd-f5ba75bb7f8d",
+      "chatId": "b1f80fd3-d3b0-47d0-b119-7f24e591d053",
+      "role": "assistant",
+      "mode": "image",
+      "text": "Nao foi possivel concluir este pedido agora. Verifica a chave OpenAI, o modelo configurado e os limites disponiveis para esta funcionalidade.",
+      "attachments": [],
+      "status": "failed",
+      "createdAt": "2026-04-29T10:38:55.215Z",
+      "model": "gpt-5.5",
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "c1a06079-a75d-4939-bbd6-7a7850b86ac0",
+      "chatId": "4ae6c460-a415-4b8b-ae09-2ad13bed21d7",
+      "role": "user",
+      "mode": "image",
+      "text": "Gera uma imagem ultra-realista, muito detalhada, com iluminacao natural, materiais crediveis e acabamento premium de um porco voador",
+      "attachments": [],
+      "status": "sent",
+      "createdAt": "2026-04-29T10:39:34.968Z",
+      "model": null,
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "ded8c1b8-78ce-40b0-b3f6-373229ccf176",
+      "chatId": "4ae6c460-a415-4b8b-ae09-2ad13bed21d7",
+      "role": "assistant",
+      "mode": "image",
+      "text": "Nao foi possivel concluir este pedido agora. Verifica a chave OpenAI, o modelo configurado e os limites disponiveis para esta funcionalidade.",
+      "attachments": [],
+      "status": "failed",
+      "createdAt": "2026-04-29T10:39:35.236Z",
+      "model": "gpt-5.5",
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "272fd20c-4d54-4a4e-b800-67104944d909",
+      "chatId": "4ae6c460-a415-4b8b-ae09-2ad13bed21d7",
+      "role": "user",
+      "mode": "image",
+      "text": "Gera uma imagem ultra-realista, muito detalhada, com iluminacao natural, materiais crediveis e acabamento premium de um porco voador",
+      "attachments": [],
+      "status": "sent",
+      "createdAt": "2026-04-29T10:39:56.412Z",
+      "model": null,
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "17e233b9-f88f-41cc-bbad-9cbf933bccae",
+      "chatId": "4ae6c460-a415-4b8b-ae09-2ad13bed21d7",
+      "role": "assistant",
+      "mode": "image",
+      "text": "Nao foi possivel concluir este pedido agora. Verifica a chave OpenAI, o modelo configurado e os limites disponiveis para esta funcionalidade.",
+      "attachments": [],
+      "status": "failed",
+      "createdAt": "2026-04-29T10:39:56.825Z",
+      "model": "gpt-5.5",
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "d6fba6af-d082-4e0f-a946-bdd1c38db2b1",
+      "chatId": "b1f80fd3-d3b0-47d0-b119-7f24e591d053",
+      "role": "user",
+      "mode": "image",
+      "text": "Gera uma imagem ultra-realista, muito detalhada, com iluminacao natural, materiais crediveis e acabamento premium de um porco voador",
+      "attachments": [],
+      "status": "sent",
+      "createdAt": "2026-04-29T10:44:03.961Z",
+      "model": null,
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "4647424f-f418-4b8b-bf26-cb4866325ab3",
+      "chatId": "b1f80fd3-d3b0-47d0-b119-7f24e591d053",
+      "role": "assistant",
+      "mode": "image",
+      "text": "Nao foi possivel concluir este pedido agora. Verifica a chave OpenAI, o modelo configurado e os limites disponiveis para esta funcionalidade.",
+      "attachments": [],
+      "status": "failed",
+      "createdAt": "2026-04-29T10:44:04.983Z",
+      "model": "gpt-5.5",
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "65b70769-cb4e-4ec7-a1e7-a89158d1d65c",
+      "chatId": "2d14d6ac-0718-453c-896b-94e2f90cdda6",
+      "role": "user",
+      "mode": "image",
+      "text": "Gera uma imagem ultra-realista, muito detalhada, com iluminacao natural, materiais crediveis e acabamento premium.",
+      "attachments": [],
+      "status": "sent",
+      "createdAt": "2026-04-29T10:46:06.875Z",
+      "model": null,
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "316281e1-5b39-4787-a041-c519f5fd49fe",
+      "chatId": "2d14d6ac-0718-453c-896b-94e2f90cdda6",
+      "role": "assistant",
+      "mode": "image",
+      "text": "Nao foi possivel concluir este pedido agora. Verifica a chave OpenAI, o modelo configurado e os limites disponiveis para esta funcionalidade.",
+      "attachments": [],
+      "status": "failed",
+      "createdAt": "2026-04-29T10:46:07.377Z",
+      "model": "dall-e-3",
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "74ea8b3f-ff69-417c-b7b2-1a35e908b7dd",
+      "chatId": "2d14d6ac-0718-453c-896b-94e2f90cdda6",
+      "role": "user",
+      "mode": "image",
+      "text": "Gera uma imagem ultra-realista, com textura fina, materiais crediveis, profundidade natural e iluminacao premium de um porco voador",
+      "attachments": [],
+      "status": "sent",
+      "createdAt": "2026-04-29T10:46:47.832Z",
+      "model": null,
+      "responseId": null,
+      "usage": null
+    },
+    {
+      "id": "c593e049-d010-4771-a5c5-834aa18f876d",
+      "chatId": "2d14d6ac-0718-453c-896b-94e2f90cdda6",
+      "role": "assistant",
+      "mode": "image",
+      "text": "Imagem gerada com foco em realismo e detalhe.\n\nPrompt optimizado:\nGenerate a hyper-realistic image with fine texture, credible materials, natural depth, and premium lighting of a flying pig.",
+      "attachments": [
+        {
+          "id": "f9cb2063-2db0-4f1c-af61-82ed0dac17c9",
+          "name": "generated-b8eca148-cfc3-47cf-a329-b830a5a9df9d.png",
+          "mimeType": "image/png",
+          "size": 1725456,
+          "kind": "generated-image",
+          "relativePath": "uploads\\2d14d6ac-0718-453c-896b-94e2f90cdda6\\f9cb2063-2db0-4f1c-af61-82ed0dac17c9-generated-b8eca148-cfc3-47cf-a329-b830a5a9df9d.png"
+        }
+      ],
+      "status": "sent",
+      "createdAt": "2026-04-29T10:47:00.746Z",
+      "model": "dall-e-3",
+      "responseId": null,
+      "usage": null
+    }
+  ]
 }

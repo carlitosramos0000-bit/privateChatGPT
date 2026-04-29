@@ -50,4 +50,6 @@ Só o utilizador `ramoscv` tem acesso à área de configurações. Nessa área �
 - Os segredos locais ficam em `data/server-secret.json`.
 - Os anexos enviados ficam em `data/uploads/`.
 - Os scripts de arranque já configuram o Node para usar os certificados do Windows e conseguir ligar à API da OpenAI.
-- O modo de imagem vem preparado para `gpt-image-2`. Se a tua organizacao OpenAI ainda nao estiver verificada, a API pode pedir essa verificacao antes de permitir geracao de imagem com esse modelo.
+- O modo de imagem vem configurado por omissao para `dall-e-3`, como fallback de compatibilidade para geracao de imagem.
+- Assim que a organizacao OpenAI estiver verificada, o mais robusto e voltar para um modelo GPT Image suportado.
+- Para edicao direta de imagens no modo Imagem, podes usar `dall-e-2` ou um modelo GPT Image depois de verificares a organizacao OpenAI.
