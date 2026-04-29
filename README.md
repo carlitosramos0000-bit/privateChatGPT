@@ -28,14 +28,10 @@ start.cmd
 
 Depois abre [http://localhost:3000](http://localhost:3000).
 
-## Credenciais iniciais
-
-- Utilizador: `ramoscv`
-- Palavra-passe: `Logica!1`
 
 ## Administração
 
-Só o utilizador `ramoscv` tem acesso à área de configurações. Nessa área é possível:
+Só o utilizador adm tem acesso à área de configurações. Nessa área é possível:
 
 - atualizar a API key da OpenAI
 - trocar os modelos de assistente, codigo e imagem
