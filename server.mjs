@@ -27,7 +27,7 @@ const MODES = ["assistant", "code", "image"];
 const REQUEST_MODES = ["auto", ...MODES];
 
 const DEFAULT_SETTINGS = {
-  assistantName: "Logic Chat",
+  assistantName: "Private ChatGPT Pro",
   defaultModel: "gpt-5.5",
   codeModel: "gpt-5.5",
   imageOutputModel: "gpt-image-2",
@@ -72,7 +72,7 @@ const server = createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Logic Chat a correr em http://localhost:${PORT}`);
+  console.log(`Private ChatGPT Pro a correr em http://localhost:${PORT}`);
 });
 
 async function bootstrap() {
@@ -184,6 +184,11 @@ function normalizeStateShape(state) {
 
   if (!state.settings.imageSystemPrompt) {
     mergedSettings.imageSystemPrompt = DEFAULT_SETTINGS.imageSystemPrompt;
+    changed = true;
+  }
+
+  if (mergedSettings.assistantName === "Logic Chat") {
+    mergedSettings.assistantName = DEFAULT_SETTINGS.assistantName;
     changed = true;
   }
 

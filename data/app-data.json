@@ -1,7 +1,7 @@
 {
   "version": 2,
   "settings": {
-    "assistantName": "Logic Chat",
+    "assistantName": "Private ChatGPT Pro",
     "defaultModel": "gpt-5.5",
     "codeModel": "gpt-5.5",
     "imageOutputModel": "gpt-image-2",

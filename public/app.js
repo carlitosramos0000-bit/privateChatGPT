@@ -1,3 +1,6 @@
+const APP_NAME = "Private ChatGPT Pro";
+const APP_SIGNATURE = "by Carlos Ramos";
+
 const MODE_META = {
   auto: {
     label: "Auto",
@@ -297,9 +300,10 @@ function renderLoginScreen() {
 
       <section class="auth-panel">
         <div class="brand-row">
-          <div class="brand-mark">LC</div>
+          <div class="brand-mark">PC</div>
           <span class="chip">Multimodal privado</span>
         </div>
+        <div class="helper-text" style="margin-bottom:10px;">${APP_SIGNATURE}</div>
         <h2 class="panel-title">Entrar na plataforma</h2>
         <p class="panel-copy">
           O chat suporta texto, anexos, geracao de codigo, imagem realista e mudanca automatica de modo conforme o pedido.
@@ -335,7 +339,8 @@ function renderAppShell() {
         <div>
           <div class="sidebar-header">
             <div>
-              <h2 class="sidebar-title">Logic Chat</h2>
+              <h2 class="sidebar-title">${APP_NAME}</h2>
+              <div class="profile-meta" style="margin-top:4px;">${APP_SIGNATURE}</div>
               <p class="sidebar-copy">Assistente privado com texto, codigo e imagem.</p>
             </div>
             <span class="hero-tag">Online</span>
@@ -635,7 +640,7 @@ function renderSettingsView() {
   }
 
   const settings = {
-    assistantName: "Logic Chat",
+    assistantName: APP_NAME,
     defaultModel: "gpt-5.5",
     codeModel: "gpt-5.5",
     imageOutputModel: "gpt-image-2",
@@ -1382,7 +1387,7 @@ function getOptimisticAssistantText(mode) {
 
 function getPublicSettings() {
   return {
-    assistantName: "Logic Chat",
+    assistantName: APP_NAME,
     defaultModel: "gpt-5.5",
     codeModel: "gpt-5.5",
     imageOutputModel: "gpt-image-2",
