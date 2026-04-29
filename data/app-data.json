@@ -1,13 +1,19 @@
 {
-  "version": 1,
+  "version": 2,
   "settings": {
     "assistantName": "Logic Chat",
-    "defaultModel": "gpt-5.3-chat-latest",
-    "systemPrompt": "Ã‰s um assistente Ãºtil, rigoroso e profissional. Responde de forma clara, organizada e com foco em ajudar o utilizador.",
+    "defaultModel": "gpt-5.5",
+    "codeModel": "gpt-5.5",
+    "imageOutputModel": "gpt-image-2",
+    "systemPrompt": "�?s um assistente útil, rigoroso e profissional. Responde de forma clara, organizada e com foco em ajudar o utilizador.",
+    "codeSystemPrompt": "You are a senior software engineer. Produce production-ready code, explain tradeoffs briefly, and when the user supplies a screenshot or image, you can recreate the UI in semantic, accessible, responsive HTML and CSS without unnecessary frameworks unless asked.",
+    "imageSystemPrompt": "Generate or edit highly realistic, polished images by default unless the user explicitly asks for another style. Preserve important identity, composition, and product details when editing reference images.",
     "reasoningEffort": "medium",
     "maxOutputTokens": 2200,
+    "imageSize": "1536x1024",
+    "imageQuality": "high",
     "openAiApiKeyEncrypted": "t7NTae0AOHdghGwb.GCV1F6KBtNEAN5idukdU5g.Fvhi3JIBtDVzrQChvWnDEAqYztjR-fgmYcZAM5tPORxPFJs_rpbIj5fVhyFOJPEM4sWlX791P_ms3iYtu80Nq3L8PNuuiccWPXYKhoyQ7iFpQ152aeZd9fS6sMnzpGRionYQUoCyvlDIk_bP9pB1bgS94RZymFW5Hdlz12BPQuaAWTdgn9RiasUWEGS5Yal8rOmu56bD1Uw3b8LDgAY_wk_8efU",
-    "updatedAt": "2026-04-29T09:08:11.490Z"
+    "updatedAt": "2026-04-29T09:56:10.906Z"
   },
   "users": [
     {
@@ -22,93 +28,6 @@
       "updatedAt": "2026-04-29T09:08:11.506Z"
     }
   ],
-  "chats": [
-    {
-      "id": "a7fcf0e9-2270-41c2-ac95-486041a6338d",
-      "userId": "18ac0a56-de72-4a14-b1eb-14cdfd21cc1c",
-      "title": "estás ai?",
-      "previousResponseId": "resp_00d38ec9f0286a240069f1ccda28608197919202febca63f34",
-      "createdAt": "2026-04-29T09:17:22.902Z",
-      "updatedAt": "2026-04-29T09:18:51.475Z"
-    }
-  ],
-  "messages": [
-    {
-      "id": "bbae1d3a-3e62-4234-8a28-aa3c5076e469",
-      "chatId": "a7fcf0e9-2270-41c2-ac95-486041a6338d",
-      "role": "user",
-      "text": "estás ai?",
-      "attachments": [],
-      "status": "sent",
-      "createdAt": "2026-04-29T09:17:33.766Z",
-      "model": null,
-      "responseId": null,
-      "usage": null
-    },
-    {
-      "id": "f2b4c875-0743-4bb5-860a-9c8e2d9987ed",
-      "chatId": "a7fcf0e9-2270-41c2-ac95-486041a6338d",
-      "role": "assistant",
-      "text": "Sim, estou aqui 🙂 Em que posso ajudar?",
-      "attachments": [],
-      "status": "sent",
-      "createdAt": "2026-04-29T09:17:51.112Z",
-      "model": "gpt-5.3-chat-latest",
-      "responseId": "resp_00d38ec9f0286a240069f1ccaf797c8197a25bb0653801c30f",
-      "usage": {
-        "input_tokens": 71,
-        "input_tokens_details": {
-          "cached_tokens": 0
-        },
-        "output_tokens": 14,
-        "output_tokens_details": {
-          "reasoning_tokens": 0
-        },
-        "total_tokens": 85
-      }
-    },
-    {
-      "id": "0acd28b1-960d-411d-9539-5da25ea89ca7",
-      "chatId": "a7fcf0e9-2270-41c2-ac95-486041a6338d",
-      "role": "user",
-      "text": "Fala-me sobre este anexo",
-      "attachments": [
-        {
-          "id": "b2a01750-83cc-46de-b3fe-c024a85a679e",
-          "name": "atr-gantt__8_.xlsx",
-          "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "size": 150784,
-          "kind": "file",
-          "relativePath": "uploads\\a7fcf0e9-2270-41c2-ac95-486041a6338d\\b2a01750-83cc-46de-b3fe-c024a85a679e-atr-gantt__8_.xlsx"
-        }
-      ],
-      "status": "sent",
-      "createdAt": "2026-04-29T09:18:16.826Z",
-      "model": null,
-      "responseId": null,
-      "usage": null
-    },
-    {
-      "id": "67bf0549-768b-4521-bd9e-a239d7e255f3",
-      "chatId": "a7fcf0e9-2270-41c2-ac95-486041a6338d",
-      "role": "assistant",
-      "text": "Este anexo é basicamente um **plano de projeto completo com Gantt**, muito detalhado, do projeto “ATR”. Aqui vai uma leitura clara e direta:\n\n**1) Visão geral**\n- Projeto: ATR  \n- Estado: **em curso**\n- Progresso global: **~45,7%**\n- Total de itens: **175 tarefas**\n- Horizonte temporal: **jun/2024 até ~2027 (com fase 2 até 2028)**\n\n**2) Estrutura do projeto**\nEstá organizado em grandes blocos:\n- **Fase 0** → análise, requisitos, arquitetura, planeamento (já concluída)\n- **Fase 1** → desenvolvimento, migração, testes, releases (principal fase atual)\n- **Fase 2** → futura (ainda não iniciada)\n\nDentro da Fase 1 há vários streams:\n- **Releases funcionais (1.1 até 1.11)**\n- **Data Migration**\n- **Testes (performance, cibersegurança)**\n- **Ambiente paralelo (cutover/go-live)**\n- **Infraestrutura**\n\n**3) Releases (core do projeto)**\n- Releases **1.1 a 1.5: concluídas (100%)**\n- Release **1.6: ~90% (quase a fechar)**\n- Releases **1.7 a 1.11: ainda por iniciar ou no início (0%)**\n\nOu seja:\n→ metade inicial entregue  \n→ segunda metade ainda por executar\n\n**4) O que está a acontecer agora**\nHá **26 tarefas em progresso**, incluindo:\n- Finalização da **Release 1.6**\n- Arranque da **Release 1.7**\n- **Migração de dados** (grande bloco ainda em curso)\n- **Testes de performance e cibersegurança**\n- Preparação do **ambiente paralelo (go-live)**\n\n**5) Riscos identificados (7 itens)**\nPrincipais problemas:\n- Dependências externas (ex: **hardening, redes, validações externas**)\n- Migração de dados (ex: **700GB pendente**)\n- Testes e integrações (REN, webservices)\n- Algumas tarefas já fora de prazo\n\n→ risco típico: **bloqueios externos + integração técnica**\n\n**6) Próximos passos**\n- Fechar Release 1.6 (maio 2026)\n- Executar Release 1.7 (maio 2026)\n- Arrancar Releases seguintes em cadeia (até 1.11)\n- Preparar:\n  - testes com agentes\n  - formação\n  - paralelo\n  - go-live (previsto: **jan 2027**)\n\n**7) Pontos críticos do plano**\n- Forte dependência de:\n  - **REN**\n  - validações externas\n- **Migração de dados** é longa e crítica\n- **Paralelo (cutover)** complexo e prolongado\n- Grande carga concentrada em poucas pessoas:\n  - destaque para **Carlos Ramos (76 tarefas)**\n\n---\n\n**Resumo simples**\nÉ um projeto grande, já a meio:\n- A primeira metade correu bem (releases entregues)\n- A segunda metade concentra risco (integrações, dados, produção)\n- O foco atual é fechar a Release 1.6 e estabilizar o caminho até ao go-live em 2027\n\nSe quiseres, posso dar-te:\n- principais riscos resumidos em 3 linhas  \n- ou uma leitura tipo “estado executivo para reunião”  \n- ou até identificar onde é mais provável haver atrasos 👀",
-      "attachments": [],
-      "status": "sent",
-      "createdAt": "2026-04-29T09:18:51.475Z",
-      "model": "gpt-5.3-chat-latest",
-      "responseId": "resp_00d38ec9f0286a240069f1ccda28608197919202febca63f34",
-      "usage": {
-        "input_tokens": 43481,
-        "input_tokens_details": {
-          "cached_tokens": 0
-        },
-        "output_tokens": 752,
-        "output_tokens_details": {
-          "reasoning_tokens": 0
-        },
-        "total_tokens": 44233
-      }
-    }
-  ]
+  "chats": [],
+  "messages": []
 }

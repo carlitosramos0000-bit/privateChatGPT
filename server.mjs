@@ -19,9 +19,31 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const MAX_BODY_BYTES = 48 * 1024 * 1024;
 const MAX_ATTACHMENTS = 4;
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MAX_HISTORY_IMAGE_REFERENCES = 3;
 const BOOTSTRAP_OPENAI_KEY = process.env.BOOTSTRAP_OPENAI_KEY?.trim() || "";
 const ADMIN_USERNAME = "ramoscv";
 const ADMIN_PASSWORD = "Logica!1";
+const MODES = ["assistant", "code", "image"];
+const REQUEST_MODES = ["auto", ...MODES];
+
+const DEFAULT_SETTINGS = {
+  assistantName: "Logic Chat",
+  defaultModel: "gpt-5.5",
+  codeModel: "gpt-5.5",
+  imageOutputModel: "gpt-image-2",
+  systemPrompt:
+    "You are a precise, helpful, production-grade assistant. Respond clearly, structure complex answers well, and stay practical.",
+  codeSystemPrompt:
+    "You are a senior software engineer. Produce production-ready code, explain tradeoffs briefly, and when the user supplies a screenshot or image, you can recreate the UI in semantic, accessible, responsive HTML and CSS without unnecessary frameworks unless asked.",
+  imageSystemPrompt:
+    "Generate or edit highly realistic, polished images by default unless the user explicitly asks for another style. Preserve important identity, composition, and product details when editing reference images.",
+  reasoningEffort: "medium",
+  maxOutputTokens: 4000,
+  imageSize: "1536x1024",
+  imageQuality: "high",
+  openAiApiKeyEncrypted: null,
+  updatedAt: new Date().toISOString(),
+};
 
 const sessions = new Map();
 let saveQueue = Promise.resolve();
@@ -40,7 +62,7 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    await serveStatic(req, res, url.pathname);
+    await serveStatic(res, url.pathname);
   } catch (error) {
     console.error("Unexpected server error", error);
     sendJson(res, error?.statusCode || 500, {
@@ -60,13 +82,17 @@ async function bootstrap() {
 
   serverSecrets = await loadOrCreateSecrets();
   appState = await loadOrCreateState();
+
+  const changed = normalizeStateShape(appState);
   await ensureDefaultAdmin();
+  if (changed) {
+    await persistState();
+  }
 }
 
 async function loadOrCreateSecrets() {
   try {
-    const raw = await fs.readFile(SECRET_FILE, "utf8");
-    return JSON.parse(raw);
+    return JSON.parse(await fs.readFile(SECRET_FILE, "utf8"));
   } catch {
     const secrets = {
       encryptionKey: crypto.randomBytes(32).toString("base64"),
@@ -79,23 +105,18 @@ async function loadOrCreateSecrets() {
 
 async function loadOrCreateState() {
   try {
-    const raw = await fs.readFile(STATE_FILE, "utf8");
-    return JSON.parse(raw);
+    return JSON.parse(await fs.readFile(STATE_FILE, "utf8"));
   } catch {
-    const seededSettings = {
-      assistantName: "Logic Chat",
-      defaultModel: "gpt-5.3-chat-latest",
-      systemPrompt:
-        "És um assistente útil, rigoroso e profissional. Responde de forma clara, organizada e com foco em ajudar o utilizador.",
-      reasoningEffort: "medium",
-      maxOutputTokens: 2200,
+    const now = new Date().toISOString();
+    const settings = {
+      ...DEFAULT_SETTINGS,
       openAiApiKeyEncrypted: BOOTSTRAP_OPENAI_KEY ? encryptSecret(BOOTSTRAP_OPENAI_KEY) : null,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
     };
 
     const initialState = {
-      version: 1,
-      settings: seededSettings,
+      version: 2,
+      settings,
       users: [
         {
           id: crypto.randomUUID(),
@@ -105,8 +126,8 @@ async function loadOrCreateState() {
           role: "admin",
           isSuperAdmin: true,
           active: true,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          createdAt: now,
+          updatedAt: now,
         },
       ],
       chats: [],
@@ -118,10 +139,116 @@ async function loadOrCreateState() {
   }
 }
 
+function normalizeStateShape(state) {
+  let changed = false;
+
+  if (typeof state.version !== "number" || state.version < 2) {
+    state.version = 2;
+    changed = true;
+  }
+
+  if (!state.settings || typeof state.settings !== "object") {
+    state.settings = { ...DEFAULT_SETTINGS };
+    changed = true;
+  }
+
+  const mergedSettings = {
+    ...DEFAULT_SETTINGS,
+    ...state.settings,
+  };
+
+  if (!state.settings.codeModel) {
+    mergedSettings.codeModel = DEFAULT_SETTINGS.codeModel;
+    changed = true;
+  }
+
+  if (!state.settings.imageOutputModel) {
+    mergedSettings.imageOutputModel = DEFAULT_SETTINGS.imageOutputModel;
+    changed = true;
+  }
+
+  if (!state.settings.imageSize) {
+    mergedSettings.imageSize = DEFAULT_SETTINGS.imageSize;
+    changed = true;
+  }
+
+  if (!state.settings.imageQuality) {
+    mergedSettings.imageQuality = DEFAULT_SETTINGS.imageQuality;
+    changed = true;
+  }
+
+  if (!state.settings.codeSystemPrompt) {
+    mergedSettings.codeSystemPrompt = DEFAULT_SETTINGS.codeSystemPrompt;
+    changed = true;
+  }
+
+  if (!state.settings.imageSystemPrompt) {
+    mergedSettings.imageSystemPrompt = DEFAULT_SETTINGS.imageSystemPrompt;
+    changed = true;
+  }
+
+  if (mergedSettings.defaultModel === "gpt-5.3-chat-latest") {
+    mergedSettings.defaultModel = DEFAULT_SETTINGS.defaultModel;
+    changed = true;
+  }
+
+  if (typeof mergedSettings.maxOutputTokens !== "number") {
+    mergedSettings.maxOutputTokens = DEFAULT_SETTINGS.maxOutputTokens;
+    changed = true;
+  }
+
+  state.settings = mergedSettings;
+
+  state.chats = Array.isArray(state.chats) ? state.chats : [];
+  state.messages = Array.isArray(state.messages) ? state.messages : [];
+  state.users = Array.isArray(state.users) ? state.users : [];
+
+  for (const chat of state.chats) {
+    const currentMemory = chat.responseMemory || {};
+    const nextMemory = {
+      assistant: currentMemory.assistant || chat.previousResponseId || null,
+      code: currentMemory.code || null,
+    };
+
+    if (JSON.stringify(currentMemory) !== JSON.stringify(nextMemory)) {
+      chat.responseMemory = nextMemory;
+      changed = true;
+    }
+
+    if (!chat.createdAt) {
+      chat.createdAt = new Date().toISOString();
+      changed = true;
+    }
+    if (!chat.updatedAt) {
+      chat.updatedAt = chat.createdAt;
+      changed = true;
+    }
+  }
+
+  for (const message of state.messages) {
+    if (!message.mode || !MODES.includes(message.mode)) {
+      message.mode = "assistant";
+      changed = true;
+    }
+
+    if (!Array.isArray(message.attachments)) {
+      message.attachments = [];
+      changed = true;
+    }
+
+    if (!message.status) {
+      message.status = "sent";
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
 async function ensureDefaultAdmin() {
   let admin = appState.users.find((user) => user.username === ADMIN_USERNAME);
-
   if (!admin) {
+    const now = new Date().toISOString();
     admin = {
       id: crypto.randomUUID(),
       username: ADMIN_USERNAME,
@@ -130,15 +257,15 @@ async function ensureDefaultAdmin() {
       role: "admin",
       isSuperAdmin: true,
       active: true,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      createdAt: now,
+      updatedAt: now,
     };
     appState.users.push(admin);
     await persistState();
     return;
   }
 
-  if (!admin.isSuperAdmin) {
+  if (!admin.isSuperAdmin || admin.role !== "admin" || !admin.active) {
     admin.isSuperAdmin = true;
     admin.role = "admin";
     admin.active = true;
@@ -162,18 +289,15 @@ async function handleApi(req, res, url, method) {
     const body = await readJsonBody(req);
     const username = String(body.username || "").trim().toLowerCase();
     const password = String(body.password || "");
-
     const user = appState.users.find((entry) => entry.username.toLowerCase() === username);
+
     if (!user || !user.active || !verifyPassword(password, user.passwordHash)) {
-      sendJson(res, 401, {
-        error: "Utilizador ou palavra-passe inválidos.",
-      });
+      sendJson(res, 401, { error: "Utilizador ou palavra-passe invalidos." });
       return;
     }
 
     const sessionToken = createSession(user.id);
     setSessionCookie(res, sessionToken);
-
     sendJson(res, 200, {
       user: serializeUser(user),
       appConfig: serializePublicAppConfig(),
@@ -202,13 +326,16 @@ async function handleApi(req, res, url, method) {
 
   if (url.pathname === "/api/chats" && method === "POST") {
     const body = await readJsonBody(req);
-    const text = String(body.title || "").trim();
+    const title = String(body.title || "").trim();
     const now = new Date().toISOString();
     const chat = {
       id: crypto.randomUUID(),
       userId: user.id,
-      title: text || "Nova conversa",
-      previousResponseId: null,
+      title: title || "Nova conversa",
+      responseMemory: {
+        assistant: null,
+        code: null,
+      },
       createdAt: now,
       updatedAt: now,
     };
@@ -222,9 +349,10 @@ async function handleApi(req, res, url, method) {
   if (chatMessagesMatch && method === "GET") {
     const chat = getChatForUser(chatMessagesMatch[1], user.id);
     if (!chat) {
-      sendJson(res, 404, { error: "Conversa não encontrada." });
+      sendJson(res, 404, { error: "Conversa nao encontrada." });
       return;
     }
+
     sendJson(res, 200, {
       chat: serializeChat(chat),
       messages: listMessagesForChat(chat.id),
@@ -235,13 +363,15 @@ async function handleApi(req, res, url, method) {
   if (chatMessagesMatch && method === "POST") {
     const chat = getChatForUser(chatMessagesMatch[1], user.id);
     if (!chat) {
-      sendJson(res, 404, { error: "Conversa não encontrada." });
+      sendJson(res, 404, { error: "Conversa nao encontrada." });
       return;
     }
 
     const body = await readJsonBody(req);
+    const requestedMode = normalizeRequestedMode(body.mode);
     const text = String(body.text || "").trim();
     const attachments = Array.isArray(body.attachments) ? body.attachments : [];
+    const mode = resolveEffectiveMode(requestedMode, text, attachments);
 
     if (!text && attachments.length === 0) {
       sendJson(res, 400, { error: "Escreve uma mensagem ou adiciona um anexo." });
@@ -249,16 +379,19 @@ async function handleApi(req, res, url, method) {
     }
 
     if (attachments.length > MAX_ATTACHMENTS) {
-      sendJson(res, 400, { error: `Podes enviar até ${MAX_ATTACHMENTS} anexos por mensagem.` });
+      sendJson(res, 400, {
+        error: `Podes enviar ate ${MAX_ATTACHMENTS} anexos por mensagem.`,
+      });
       return;
     }
 
-    const storedAttachments = await saveAttachments(chat.id, attachments);
+    const storedAttachments = await saveIncomingAttachments(chat.id, attachments);
     const now = new Date().toISOString();
     const userMessage = {
       id: crypto.randomUUID(),
       chatId: chat.id,
       role: "user",
+      mode,
       text,
       attachments: storedAttachments,
       status: "sent",
@@ -270,35 +403,38 @@ async function handleApi(req, res, url, method) {
 
     appState.messages.push(userMessage);
     chat.updatedAt = now;
-    if (chat.title === "Nova conversa" && text) {
-      chat.title = buildChatTitle(text);
+    if (chat.title === "Nova conversa") {
+      chat.title = buildChatTitle(text, mode);
     }
 
     let assistantMessage = null;
     let warning = null;
 
     try {
-      const completion = await requestOpenAiResponse({
-        user,
-        chat,
-        text,
-        attachments,
-      });
+      const completion =
+        mode === "image"
+          ? await requestImageResponse({ user, chat, text, attachments })
+          : await requestTextResponse({ user, chat, text, attachments, mode });
 
       assistantMessage = {
         id: crypto.randomUUID(),
         chatId: chat.id,
         role: "assistant",
+        mode,
         text: completion.text,
-        attachments: [],
+        attachments: completion.attachments || [],
         status: "sent",
         createdAt: new Date().toISOString(),
         model: completion.model,
-        responseId: completion.responseId,
-        usage: completion.usage,
+        responseId: completion.responseId || null,
+        usage: completion.usage || null,
       };
 
-      chat.previousResponseId = completion.responseId;
+      if (mode !== "image" && completion.responseId) {
+        chat.responseMemory = chat.responseMemory || { assistant: null, code: null };
+        chat.responseMemory[mode] = completion.responseId;
+      }
+
       chat.updatedAt = assistantMessage.createdAt;
       appState.messages.push(assistantMessage);
     } catch (error) {
@@ -307,12 +443,13 @@ async function handleApi(req, res, url, method) {
         id: crypto.randomUUID(),
         chatId: chat.id,
         role: "assistant",
+        mode,
         text:
-          "Nao foi possivel concluir este pedido agora. Verifica a configuracao da chave, o modelo selecionado ou os limites da conta OpenAI.",
+          "Nao foi possivel concluir este pedido agora. Verifica a chave OpenAI, o modelo configurado e os limites disponiveis para esta funcionalidade.",
         attachments: [],
         status: "failed",
         createdAt: new Date().toISOString(),
-        model: appState.settings.defaultModel,
+        model: selectModelForMode(mode),
         responseId: null,
         usage: null,
       };
@@ -321,7 +458,6 @@ async function handleApi(req, res, url, method) {
     }
 
     await persistState();
-
     sendJson(res, 200, {
       chat: serializeChat(chat),
       userMessage: serializeMessage(userMessage),
@@ -335,7 +471,7 @@ async function handleApi(req, res, url, method) {
   if (chatMatch && method === "DELETE") {
     const chat = getChatForUser(chatMatch[1], user.id);
     if (!chat) {
-      sendJson(res, 404, { error: "Conversa não encontrada." });
+      sendJson(res, 404, { error: "Conversa nao encontrada." });
       return;
     }
 
@@ -348,7 +484,7 @@ async function handleApi(req, res, url, method) {
   if (attachmentMatch && method === "GET") {
     const attachment = await findAttachmentForUser(attachmentMatch[1], user.id);
     if (!attachment) {
-      sendJson(res, 404, { error: "Anexo não encontrado." });
+      sendJson(res, 404, { error: "Anexo nao encontrado." });
       return;
     }
 
@@ -383,21 +519,30 @@ async function handleApi(req, res, url, method) {
     }
 
     const body = await readJsonBody(req);
-    const incomingModel = String(body.defaultModel || "").trim();
-    const incomingPrompt = String(body.systemPrompt || "").trim();
-    const incomingAssistantName = String(body.assistantName || "").trim();
     const incomingApiKey = String(body.openAiApiKey || "").trim();
-    const incomingReasoningEffort = String(body.reasoningEffort || "medium").trim();
-    const incomingMaxOutputTokens = Number(body.maxOutputTokens || 2200);
+    const nextSettings = {
+      assistantName: String(body.assistantName || "").trim() || appState.settings.assistantName,
+      defaultModel: String(body.defaultModel || "").trim() || appState.settings.defaultModel,
+      codeModel: String(body.codeModel || "").trim() || appState.settings.codeModel,
+      imageOutputModel:
+        String(body.imageOutputModel || "").trim() || appState.settings.imageOutputModel,
+      systemPrompt:
+        String(body.systemPrompt || "").trim() || appState.settings.systemPrompt,
+      codeSystemPrompt:
+        String(body.codeSystemPrompt || "").trim() || appState.settings.codeSystemPrompt,
+      imageSystemPrompt:
+        String(body.imageSystemPrompt || "").trim() || appState.settings.imageSystemPrompt,
+      reasoningEffort: validateReasoningEffort(body.reasoningEffort),
+      maxOutputTokens: validateMaxOutputTokens(body.maxOutputTokens),
+      imageSize: validateImageSize(body.imageSize),
+      imageQuality: validateImageQuality(body.imageQuality),
+      updatedAt: new Date().toISOString(),
+    };
 
-    appState.settings.defaultModel = incomingModel || appState.settings.defaultModel || "gpt-5.3-chat-latest";
-    appState.settings.systemPrompt = incomingPrompt || appState.settings.systemPrompt;
-    appState.settings.assistantName = incomingAssistantName || appState.settings.assistantName || "Logic Chat";
-    appState.settings.reasoningEffort = incomingReasoningEffort || "medium";
-    appState.settings.maxOutputTokens = Number.isFinite(incomingMaxOutputTokens)
-      ? Math.max(256, Math.min(12000, Math.round(incomingMaxOutputTokens)))
-      : 2200;
-    appState.settings.updatedAt = new Date().toISOString();
+    appState.settings = {
+      ...appState.settings,
+      ...nextSettings,
+    };
 
     if (incomingApiKey) {
       appState.settings.openAiApiKeyEncrypted = encryptSecret(incomingApiKey);
@@ -439,12 +584,13 @@ async function handleApi(req, res, url, method) {
 
     if (!/^[a-z0-9._-]{3,30}$/i.test(username)) {
       sendJson(res, 400, {
-        error: "O utilizador deve ter entre 3 e 30 caracteres e usar apenas letras, numeros, ponto, underscore ou hifen.",
+        error:
+          "O utilizador deve ter entre 3 e 30 caracteres e usar apenas letras, numeros, ponto, underscore ou hifen.",
       });
       return;
     }
 
-    if (appState.users.some((entry) => entry.username.toLowerCase() === username.toLowerCase())) {
+    if (appState.users.some((entry) => entry.username.toLowerCase() === username)) {
       sendJson(res, 409, { error: "Ja existe um utilizador com esse identificador." });
       return;
     }
@@ -496,8 +642,8 @@ async function handleApi(req, res, url, method) {
     if (typeof body.password === "string" && body.password.trim()) {
       managedUser.passwordHash = hashPassword(body.password.trim());
     }
-    managedUser.updatedAt = new Date().toISOString();
 
+    managedUser.updatedAt = new Date().toISOString();
     await persistState();
     sendJson(res, 200, { user: serializeManagedUser(managedUser) });
     return;
@@ -528,7 +674,7 @@ async function handleApi(req, res, url, method) {
   sendJson(res, 404, { error: "Endpoint nao encontrado." });
 }
 
-async function serveStatic(req, res, pathname) {
+async function serveStatic(res, pathname) {
   const targetPath = pathname === "/" ? "/index.html" : pathname;
   const safePath = path.normalize(targetPath).replace(/^(\.\.[/\\])+/, "");
   let filePath = path.join(PUBLIC_DIR, safePath);
@@ -597,8 +743,7 @@ async function readJsonBody(req) {
   }
 
   try {
-    const raw = Buffer.concat(chunks).toString("utf8");
-    return JSON.parse(raw);
+    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
     const error = new Error("JSON invalido.");
     error.statusCode = 400;
@@ -617,9 +762,9 @@ function parseCookies(req) {
       if (separatorIndex === -1) {
         return accumulator;
       }
-      const key = part.slice(0, separatorIndex);
-      const value = part.slice(separatorIndex + 1);
-      accumulator[key] = decodeURIComponent(value);
+      accumulator[part.slice(0, separatorIndex)] = decodeURIComponent(
+        part.slice(separatorIndex + 1),
+      );
       return accumulator;
     }, {});
 }
@@ -742,9 +887,15 @@ function serializeSettings() {
   return {
     assistantName: appState.settings.assistantName,
     defaultModel: appState.settings.defaultModel,
+    codeModel: appState.settings.codeModel,
+    imageOutputModel: appState.settings.imageOutputModel,
     systemPrompt: appState.settings.systemPrompt,
+    codeSystemPrompt: appState.settings.codeSystemPrompt,
+    imageSystemPrompt: appState.settings.imageSystemPrompt,
     reasoningEffort: appState.settings.reasoningEffort,
     maxOutputTokens: appState.settings.maxOutputTokens,
+    imageSize: appState.settings.imageSize,
+    imageQuality: appState.settings.imageQuality,
     hasApiKey: Boolean(decryptedKey),
     maskedApiKey: maskSecret(decryptedKey),
     updatedAt: appState.settings.updatedAt,
@@ -755,6 +906,10 @@ function serializePublicAppConfig() {
   return {
     assistantName: appState.settings.assistantName,
     defaultModel: appState.settings.defaultModel,
+    codeModel: appState.settings.codeModel,
+    imageOutputModel: appState.settings.imageOutputModel,
+    imageSize: appState.settings.imageSize,
+    imageQuality: appState.settings.imageQuality,
   };
 }
 
@@ -768,7 +923,6 @@ function listChatsForUser(userId) {
 function serializeChat(chat) {
   const messages = appState.messages.filter((message) => message.chatId === chat.id);
   const lastMessage = messages[messages.length - 1];
-
   return {
     id: chat.id,
     title: chat.title,
@@ -790,6 +944,7 @@ function serializeMessage(message) {
   return {
     id: message.id,
     role: message.role,
+    mode: normalizeMode(message.mode),
     text: message.text,
     status: message.status,
     createdAt: message.createdAt,
@@ -807,32 +962,121 @@ function serializeMessage(message) {
 }
 
 function previewFromMessage(message) {
+  const label = modeLabel(normalizeMode(message.mode));
   if (message.text) {
-    return message.text.length > 72 ? `${message.text.slice(0, 72)}...` : message.text;
+    const snippet =
+      message.text.length > 68 ? `${message.text.slice(0, 68)}...` : message.text;
+    return `[${label}] ${snippet}`;
   }
+
   if (message.attachments?.length) {
-    return `${message.attachments.length} anexo(s)`;
+    return `[${label}] ${message.attachments.length} anexo(s)`;
   }
-  return "Nova mensagem";
+
+  return `[${label}] Nova mensagem`;
+}
+
+function normalizeMode(value) {
+  return MODES.includes(value) ? value : "assistant";
+}
+
+function normalizeRequestedMode(value) {
+  return REQUEST_MODES.includes(value) ? value : "auto";
+}
+
+function resolveEffectiveMode(requestedMode, text, attachments) {
+  if (requestedMode !== "auto") {
+    return normalizeMode(requestedMode);
+  }
+
+  const lowered = String(text || "").toLowerCase();
+  const hasImageAttachment = attachments.some((attachment) =>
+    String(attachment.type || "").toLowerCase().startsWith("image/"),
+  );
+
+  const imageIntentPatterns = [
+    /gera(?:r)?\s+uma?\s+imagem/,
+    /cria(?:r)?\s+uma?\s+imagem/,
+    /fotoreal/,
+    /realistic/,
+    /mockup/,
+    /render/,
+    /editar?\s+a?\s+imagem/,
+    /melhora(?:r)?\s+o\s+realismo/,
+  ];
+
+  const codeIntentPatterns = [
+    /\bhtml\b/,
+    /\bcss\b/,
+    /\bjavascript\b/,
+    /\btypescript\b/,
+    /\bpython\b/,
+    /\breact\b/,
+    /\bnode\b/,
+    /\bapi\b/,
+    /\bcodigo\b/,
+    /\bsoftware\b/,
+    /\bapp\b/,
+    /\bbug\b/,
+    /\brefactor/,
+    /\binterface\b/,
+    /\bscreenshot\b/,
+    /\bwireframe\b/,
+    /\blanding page\b/,
+  ];
+
+  if (hasImageAttachment && codeIntentPatterns.some((pattern) => pattern.test(lowered))) {
+    return "code";
+  }
+
+  if (imageIntentPatterns.some((pattern) => pattern.test(lowered))) {
+    return "image";
+  }
+
+  if (codeIntentPatterns.some((pattern) => pattern.test(lowered))) {
+    return "code";
+  }
+
+  return "assistant";
+}
+
+function modeLabel(mode) {
+  switch (mode) {
+    case "code":
+      return "Codigo";
+    case "image":
+      return "Imagem";
+    default:
+      return "Assistente";
+  }
 }
 
 function getChatForUser(chatId, userId) {
   return appState.chats.find((chat) => chat.id === chatId && chat.userId === userId) || null;
 }
 
-function buildChatTitle(text) {
-  const compact = text.replace(/\s+/g, " ").trim();
+function buildChatTitle(text, mode) {
+  const fallbackTitles = {
+    assistant: "Conversa assistida",
+    code: "Sessao de codigo",
+    image: "Projeto visual",
+  };
+  const compact = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!compact) {
+    return fallbackTitles[mode] || fallbackTitles.assistant;
+  }
   return compact.length <= 42 ? compact : `${compact.slice(0, 42)}...`;
 }
 
-async function saveAttachments(chatId, attachments) {
+async function saveIncomingAttachments(chatId, attachments) {
   const saved = [];
 
   for (const rawAttachment of attachments) {
     const name = sanitizeFilename(String(rawAttachment.name || "anexo"));
     const mimeType = String(rawAttachment.type || "application/octet-stream");
     const dataUrl = String(rawAttachment.dataUrl || "");
-
     if (!dataUrl.startsWith("data:")) {
       throw new Error("Anexo invalido.");
     }
@@ -842,23 +1086,49 @@ async function saveAttachments(chatId, attachments) {
       throw new Error(`O ficheiro ${name} excede o limite de 8 MB.`);
     }
 
-    const attachmentId = crypto.randomUUID();
-    const relativePath = path.join("uploads", chatId, `${attachmentId}-${name}`);
-    const absolutePath = path.join(DATA_DIR, relativePath);
-    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
-    await fs.writeFile(absolutePath, buffer);
-
-    saved.push({
-      id: attachmentId,
-      name,
-      mimeType,
-      size: buffer.length,
-      kind: mimeType.startsWith("image/") ? "image" : "file",
-      relativePath,
-    });
+    saved.push(
+      await writeAttachmentFile(chatId, {
+        buffer,
+        filename: name,
+        mimeType,
+        kind: mimeType.startsWith("image/") ? "image" : "file",
+      }),
+    );
   }
 
   return saved;
+}
+
+async function saveGeneratedImageAttachment(chatId, { imageBase64, format = "png" }) {
+  const buffer = Buffer.from(imageBase64, "base64");
+  if (!buffer.length) {
+    throw new Error("A OpenAI nao devolveu imagem gerada.");
+  }
+
+  const extension = normalizeImageExtension(format);
+  return writeAttachmentFile(chatId, {
+    buffer,
+    filename: `generated-${crypto.randomUUID()}.${extension}`,
+    mimeType: `image/${extension === "jpg" ? "jpeg" : extension}`,
+    kind: "generated-image",
+  });
+}
+
+async function writeAttachmentFile(chatId, { buffer, filename, mimeType, kind }) {
+  const attachmentId = crypto.randomUUID();
+  const relativePath = path.join("uploads", chatId, `${attachmentId}-${filename}`);
+  const absolutePath = path.join(DATA_DIR, relativePath);
+  await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+  await fs.writeFile(absolutePath, buffer);
+
+  return {
+    id: attachmentId,
+    name: filename,
+    mimeType,
+    size: buffer.length,
+    kind,
+    relativePath,
+  };
 }
 
 function sanitizeFilename(name) {
@@ -870,26 +1140,65 @@ function decodeDataUrl(dataUrl) {
   if (!match) {
     throw new Error("Formato de anexo nao suportado.");
   }
+
   return {
     mimeType: match[1],
     buffer: Buffer.from(match[2], "base64"),
   };
 }
 
-async function requestOpenAiResponse({ user, chat, text, attachments }) {
-  const apiKey = appState.settings.openAiApiKeyEncrypted
-    ? decryptSecret(appState.settings.openAiApiKeyEncrypted)
-    : "";
+async function requestTextResponse({ user, chat, text, attachments, mode }) {
+  const apiKey = getOpenAiApiKey();
+  const inputContent = buildTextInputContent(text, attachments, mode);
+  const model = selectModelForMode(mode);
+  const payload = {
+    model,
+    instructions: buildInstructionsForMode(mode),
+    input: [
+      {
+        role: "user",
+        content: inputContent,
+      },
+    ],
+    previous_response_id: chat.responseMemory?.[mode] || undefined,
+    max_output_tokens: Number(appState.settings.maxOutputTokens || DEFAULT_SETTINGS.maxOutputTokens),
+    store: true,
+    metadata: {
+      local_user: user.username,
+      local_chat: chat.id,
+      local_mode: mode,
+    },
+  };
 
-  if (!apiKey) {
-    throw new Error("A chave da OpenAI ainda nao foi configurada.");
+  if (supportsReasoning(model)) {
+    payload.reasoning = {
+      effort: appState.settings.reasoningEffort || DEFAULT_SETTINGS.reasoningEffort,
+    };
   }
 
+  const response = await callOpenAiJson({
+    apiKey,
+    endpoint: "https://api.openai.com/v1/responses",
+    payload,
+  });
+
+  const textOutput = extractAssistantText(response);
+  return {
+    text: textOutput || "Sem texto de resposta produzido pelo modelo.",
+    responseId: response.id || null,
+    model: response.model || model,
+    usage: response.usage || null,
+  };
+}
+
+function buildTextInputContent(text, attachments, mode) {
   const inputContent = [];
-  if (text) {
+  const effectiveText = text || buildFallbackPrompt(mode, attachments);
+
+  if (effectiveText) {
     inputContent.push({
       type: "input_text",
-      text,
+      text: effectiveText,
     });
   }
 
@@ -906,7 +1215,7 @@ async function requestOpenAiResponse({ user, chat, text, attachments }) {
       inputContent.push({
         type: "input_image",
         image_url: dataUrl,
-        detail: "auto",
+        detail: "high",
       });
       continue;
     }
@@ -918,43 +1227,243 @@ async function requestOpenAiResponse({ user, chat, text, attachments }) {
     });
   }
 
-  if (inputContent.length === 0) {
-    inputContent.push({
-      type: "input_text",
-      text: "Analisa os anexos enviados e ajuda o utilizador.",
+  return inputContent;
+}
+
+function buildFallbackPrompt(mode, attachments) {
+  if (mode === "code") {
+    return attachments.some((attachment) => String(attachment.type || "").startsWith("image/"))
+      ? "Recria a interface mostrada na imagem em HTML e CSS puros, responsivos, semanticamente corretos e prontos a abrir no browser. Entrega o codigo final completo."
+      : "Produz a melhor resposta de engenharia de software para este pedido, com codigo final e observacoes curtas quando for util.";
+  }
+
+  if (mode === "image") {
+    return attachments.some((attachment) => String(attachment.type || "").startsWith("image/"))
+      ? "Edita a imagem de referencia para a tornar mais realista, polida e visualmente premium."
+      : "Cria uma imagem ultra-realista, detalhada e visualmente forte a partir deste pedido.";
+  }
+
+  return "Analisa os anexos enviados e ajuda o utilizador da forma mais pratica possivel.";
+}
+
+function buildInstructionsForMode(mode) {
+  const basePrompt =
+    appState.settings.systemPrompt || DEFAULT_SETTINGS.systemPrompt;
+  const assistantName =
+    appState.settings.assistantName || DEFAULT_SETTINGS.assistantName;
+
+  if (mode === "code") {
+    const codePrompt =
+      appState.settings.codeSystemPrompt || DEFAULT_SETTINGS.codeSystemPrompt;
+    return `${basePrompt}\n\n${codePrompt}\n\nAssistant name: ${assistantName}.\nDefault language for responses: European Portuguese unless the user requests another language.`;
+  }
+
+  return `${basePrompt}\n\nAssistant name: ${assistantName}.\nDefault language for responses: European Portuguese unless the user requests another language.`;
+}
+
+async function requestImageResponse({ chat, text, attachments }) {
+  const apiKey = getOpenAiApiKey();
+  const prompt = buildImagePrompt(text, attachments);
+  const liveReferences = collectEditableImageReferences(attachments);
+  const historyReferences = liveReferences.length
+    ? []
+    : await getRecentImageReferences(chat.id, MAX_HISTORY_IMAGE_REFERENCES);
+  const references = [...liveReferences, ...historyReferences].slice(0, MAX_HISTORY_IMAGE_REFERENCES);
+
+  const imageResult = references.length
+    ? await requestImageEdit({
+        apiKey,
+        prompt,
+        references,
+      })
+    : await requestImageGeneration({
+        apiKey,
+        prompt,
+      });
+
+  const savedAttachment = await saveGeneratedImageAttachment(chat.id, {
+    imageBase64: imageResult.imageBase64,
+    format: imageResult.format,
+  });
+
+  const textSummary = buildImageResultSummary({
+    prompt,
+    action: references.length ? "edit" : "generate",
+    revisedPrompt: imageResult.revisedPrompt,
+  });
+
+  return {
+    text: textSummary,
+    attachments: [savedAttachment],
+    responseId: null,
+    model: appState.settings.imageOutputModel || DEFAULT_SETTINGS.imageOutputModel,
+    usage: imageResult.usage || null,
+  };
+}
+
+function buildImagePrompt(text, attachments) {
+  const userText = text || buildFallbackPrompt("image", attachments);
+  const imagePrompt =
+    appState.settings.imageSystemPrompt || DEFAULT_SETTINGS.imageSystemPrompt;
+
+  return `${imagePrompt}\n\nUser request:\n${userText}\n\nIf the user did not ask for illustration or stylization, prefer a realistic photographic result with strong materials, lighting, texture fidelity, clean composition, and believable depth.`;
+}
+
+function collectEditableImageReferences(attachments) {
+  const references = [];
+  for (const attachment of attachments) {
+    const mimeType = String(attachment.type || "").toLowerCase();
+    if (!isEditableImageMimeType(mimeType)) {
+      continue;
+    }
+
+    const dataUrl = String(attachment.dataUrl || "");
+    if (!dataUrl) {
+      continue;
+    }
+
+    const { buffer } = decodeDataUrl(dataUrl);
+    references.push({
+      name: sanitizeFilename(String(attachment.name || "reference.png")),
+      mimeType,
+      buffer,
     });
   }
+  return references;
+}
 
-  const payload = {
-    model: appState.settings.defaultModel || "gpt-5.3-chat-latest",
-    instructions: buildInstructions(),
-    input: [
-      {
-        role: "user",
-        content: inputContent,
-      },
-    ],
-    previous_response_id: chat.previousResponseId || undefined,
-    max_output_tokens: Number(appState.settings.maxOutputTokens || 2200),
-    store: true,
-    metadata: {
-      local_user: user.username,
-      local_chat: chat.id,
-    },
-  };
+async function getRecentImageReferences(chatId, limit) {
+  const references = [];
+  const messages = appState.messages
+    .filter((message) => message.chatId === chatId)
+    .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
 
-  if (supportsReasoning(payload.model)) {
-    payload.reasoning = {
-      effort: appState.settings.reasoningEffort || "medium",
-    };
+  for (const message of messages) {
+    for (const attachment of message.attachments || []) {
+      if (!String(attachment.mimeType || "").startsWith("image/")) {
+        continue;
+      }
+
+      const absolutePath = path.join(DATA_DIR, attachment.relativePath);
+      try {
+        const buffer = await fs.readFile(absolutePath);
+        references.push({
+          name: sanitizeFilename(attachment.name),
+          mimeType: attachment.mimeType,
+          buffer,
+        });
+      } catch {
+        // Ignore missing files and continue.
+      }
+
+      if (references.length >= limit) {
+        return references;
+      }
+    }
   }
 
+  return references;
+}
+
+function isEditableImageMimeType(mimeType) {
+  return ["image/png", "image/jpeg", "image/jpg", "image/webp"].includes(mimeType);
+}
+
+async function requestImageGeneration({ apiKey, prompt }) {
+  const payload = {
+    model: appState.settings.imageOutputModel || DEFAULT_SETTINGS.imageOutputModel,
+    prompt,
+    size: validateImageSize(appState.settings.imageSize),
+    quality: validateImageQuality(appState.settings.imageQuality),
+    output_format: "png",
+  };
+
+  const response = await callOpenAiJson({
+    apiKey,
+    endpoint: "https://api.openai.com/v1/images/generations",
+    payload,
+  });
+
+  const firstImage = response.data?.[0];
+  if (!firstImage?.b64_json) {
+    throw new Error("A API de imagem nao devolveu dados para a geracao.");
+  }
+
+  return {
+    imageBase64: firstImage.b64_json,
+    revisedPrompt: firstImage.revised_prompt || response.revised_prompt || "",
+    format: "png",
+    usage: response.usage || null,
+  };
+}
+
+async function requestImageEdit({ apiKey, prompt, references }) {
+  const form = new FormData();
+  form.append("model", appState.settings.imageOutputModel || DEFAULT_SETTINGS.imageOutputModel);
+  form.append("prompt", prompt);
+  form.append("size", validateImageSize(appState.settings.imageSize));
+  form.append("quality", validateImageQuality(appState.settings.imageQuality));
+  form.append("output_format", "png");
+
+  for (const reference of references) {
+    const blob = new Blob([reference.buffer], { type: reference.mimeType });
+    form.append("image", blob, reference.name);
+  }
+
+  const response = await callOpenAiMultipart({
+    apiKey,
+    endpoint: "https://api.openai.com/v1/images/edits",
+    body: form,
+  });
+
+  const firstImage = response.data?.[0];
+  if (!firstImage?.b64_json) {
+    throw new Error("A API de imagem nao devolveu dados para a edicao.");
+  }
+
+  return {
+    imageBase64: firstImage.b64_json,
+    revisedPrompt: firstImage.revised_prompt || response.revised_prompt || "",
+    format: "png",
+    usage: response.usage || null,
+  };
+}
+
+function buildImageResultSummary({ action, revisedPrompt }) {
+  const intro =
+    action === "edit"
+      ? "Imagem editada e regenerada com foco em realismo e acabamento."
+      : "Imagem gerada com foco em realismo e detalhe.";
+
+  if (!revisedPrompt) {
+    return intro;
+  }
+
+  return `${intro}\n\nPrompt optimizado:\n${revisedPrompt}`;
+}
+
+function selectModelForMode(mode) {
+  if (mode === "code") {
+    return appState.settings.codeModel || DEFAULT_SETTINGS.codeModel;
+  }
+  return appState.settings.defaultModel || DEFAULT_SETTINGS.defaultModel;
+}
+
+function supportsReasoning(model) {
+  return (
+    typeof model === "string" &&
+    !model.includes("chat-latest") &&
+    (model.startsWith("gpt-5") || model.startsWith("o"))
+  );
+}
+
+async function callOpenAiJson({ apiKey, endpoint, payload }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 120000);
 
   let response;
   try {
-    response = await fetch("https://api.openai.com/v1/responses", {
+    response = await fetch(endpoint, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -964,41 +1473,67 @@ async function requestOpenAiResponse({ user, chat, text, attachments }) {
       signal: controller.signal,
     });
   } catch (error) {
-    if (error?.cause?.code === "UNABLE_TO_GET_ISSUER_CERT_LOCALLY") {
-      throw new Error(
-        "Falha TLS ao contactar a OpenAI. Inicia a aplicacao pelos scripts start.ps1 ou start.cmd para usar os certificados do sistema.",
-      );
-    }
-    throw error;
+    throw normalizeOpenAiTransportError(error);
   } finally {
     clearTimeout(timeout);
   }
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.error?.message || "A API da OpenAI devolveu um erro.");
+    throw new Error(extractOpenAiError(data, "A API da OpenAI devolveu um erro."));
   }
 
-  const textOutput = extractAssistantText(data);
-  return {
-    text: textOutput || "Sem texto de resposta produzido pelo modelo.",
-    responseId: data.id || null,
-    model: data.model || payload.model,
-    usage: data.usage || null,
-  };
+  return data;
 }
 
-function buildInstructions() {
-  const assistantName = appState.settings.assistantName || "Logic Chat";
-  const systemPrompt =
-    appState.settings.systemPrompt ||
-    "És um assistente útil, rigoroso e profissional. Responde de forma clara, organizada e com foco em ajudar o utilizador.";
+async function callOpenAiMultipart({ apiKey, endpoint, body }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 180000);
 
-  return `${systemPrompt}\n\nNome do assistente: ${assistantName}.\nIdioma por omissao: portugues europeu, exceto se o utilizador pedir outro idioma.`;
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    throw normalizeOpenAiTransportError(error);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(extractOpenAiError(data, "A API de imagem da OpenAI devolveu um erro."));
+  }
+
+  return data;
 }
 
-function supportsReasoning(model) {
-  return !String(model).includes("chat-latest") && (String(model).startsWith("gpt-5") || String(model).startsWith("o"));
+function normalizeOpenAiTransportError(error) {
+  if (error?.cause?.code === "UNABLE_TO_GET_ISSUER_CERT_LOCALLY") {
+    return new Error(
+      "Falha TLS ao contactar a OpenAI. Inicia a aplicacao pelos scripts start.ps1 ou start.cmd para usar os certificados do sistema.",
+    );
+  }
+
+  if (error?.name === "AbortError") {
+    return new Error("A OpenAI demorou demasiado tempo a responder.");
+  }
+
+  return error;
+}
+
+function extractOpenAiError(payload, fallback) {
+  return (
+    payload?.error?.message ||
+    payload?.message ||
+    fallback
+  );
 }
 
 function extractAssistantText(responsePayload) {
@@ -1021,6 +1556,52 @@ function extractAssistantText(responsePayload) {
   return parts.join("\n").trim();
 }
 
+function validateReasoningEffort(value) {
+  return ["minimal", "low", "medium", "high", "xhigh"].includes(value)
+    ? value
+    : DEFAULT_SETTINGS.reasoningEffort;
+}
+
+function validateMaxOutputTokens(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return DEFAULT_SETTINGS.maxOutputTokens;
+  }
+  return Math.max(256, Math.min(12000, Math.round(parsed)));
+}
+
+function validateImageSize(value) {
+  return ["1024x1024", "1024x1536", "1536x1024", "auto"].includes(value)
+    ? value
+    : DEFAULT_SETTINGS.imageSize;
+}
+
+function validateImageQuality(value) {
+  return ["low", "medium", "high", "auto"].includes(value)
+    ? value
+    : DEFAULT_SETTINGS.imageQuality;
+}
+
+function normalizeImageExtension(format) {
+  const lower = String(format || "png").toLowerCase();
+  if (["png", "jpg", "jpeg", "webp"].includes(lower)) {
+    return lower === "jpeg" ? "jpg" : lower;
+  }
+  return "png";
+}
+
+function getOpenAiApiKey() {
+  const apiKey = appState.settings.openAiApiKeyEncrypted
+    ? decryptSecret(appState.settings.openAiApiKeyEncrypted)
+    : "";
+
+  if (!apiKey) {
+    throw new Error("A chave da OpenAI ainda nao foi configurada.");
+  }
+
+  return apiKey;
+}
+
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("base64url");
   const derived = crypto.pbkdf2Sync(password, salt, 120000, 32, "sha256").toString("base64url");
@@ -1032,6 +1613,7 @@ function verifyPassword(password, stored) {
   if (!salt || !expected) {
     return false;
   }
+
   const derived = crypto.pbkdf2Sync(password, salt, 120000, 32, "sha256").toString("base64url");
   return crypto.timingSafeEqual(Buffer.from(derived), Buffer.from(expected));
 }
@@ -1050,6 +1632,7 @@ function decryptSecret(payload) {
   if (!ivBase64 || !tagBase64 || !contentBase64) {
     return "";
   }
+
   const key = Buffer.from(serverSecrets.encryptionKey, "base64");
   const decipher = crypto.createDecipheriv(
     "aes-256-gcm",
@@ -1095,6 +1678,7 @@ async function findAttachmentForUser(attachmentId, userId) {
       return match;
     }
   }
+
   return null;
 }
 

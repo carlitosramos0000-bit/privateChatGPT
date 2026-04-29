@@ -1,3 +1,110 @@
+const MODE_META = {
+  auto: {
+    label: "Auto",
+    hint: "Escolhe automaticamente entre assistente, codigo e imagem.",
+  },
+  assistant: {
+    label: "Assistente",
+    hint: "Conversas, analise de documentos e ajuda geral.",
+  },
+  code: {
+    label: "Codigo",
+    hint: "Software, debugging, geracao de codigo e HTML/CSS a partir de imagens.",
+  },
+  image: {
+    label: "Imagem",
+    hint: "Geracao e edicao de imagens com foco em realismo.",
+  },
+};
+
+const PRESETS = {
+  auto: [
+    {
+      id: "auto-image",
+      mode: "image",
+      label: "Imagem realista",
+      prompt:
+        "Gera uma imagem ultra-realista, muito detalhada, com iluminacao natural, materiais crediveis e acabamento premium.",
+    },
+    {
+      id: "auto-code",
+      mode: "code",
+      label: "Gerar software",
+      prompt:
+        "Desenha a melhor solucao de software para este pedido e entrega o codigo final pronto a usar.",
+    },
+    {
+      id: "auto-html",
+      mode: "code",
+      label: "HTML/CSS da imagem",
+      prompt:
+        "Recria a interface mostrada na imagem em HTML e CSS puros, responsivos, semanticamente corretos e prontos a abrir no browser. Entrega o codigo completo.",
+    },
+  ],
+  assistant: [
+    {
+      id: "assistant-summary",
+      mode: "assistant",
+      label: "Resumo estruturado",
+      prompt:
+        "Resume este conteudo com clareza e organiza a resposta em pontos de decisao, riscos e proximos passos.",
+    },
+    {
+      id: "assistant-plan",
+      mode: "assistant",
+      label: "Plano detalhado",
+      prompt:
+        "Cria um plano detalhado, com prioridades, dependencias e entregaveis objetivos.",
+    },
+  ],
+  code: [
+    {
+      id: "code-build",
+      mode: "code",
+      label: "Gerar codigo",
+      prompt:
+        "Produz uma implementacao de software pronta a usar, com estrutura clara, ficheiros necessarios e codigo final completo.",
+    },
+    {
+      id: "code-image-html",
+      mode: "code",
+      label: "HTML/CSS da imagem",
+      prompt:
+        "Recria a interface mostrada na imagem em HTML e CSS puros, responsivos, semanticamente corretos e prontos a abrir no browser. Entrega o codigo completo.",
+    },
+    {
+      id: "code-review",
+      mode: "code",
+      label: "Corrigir bug",
+      prompt:
+        "Analisa o problema, encontra a causa, propoe a correcao e entrega o codigo final com explicacao curta.",
+    },
+  ],
+  image: [
+    {
+      id: "image-real",
+      mode: "image",
+      label: "Ultra-realista",
+      prompt:
+        "Gera uma imagem ultra-realista, com textura fina, materiais crediveis, profundidade natural e iluminacao premium.",
+    },
+    {
+      id: "image-edit",
+      mode: "image",
+      label: "Editar ultima imagem",
+      prompt:
+        "Edita a ultima imagem mantendo a identidade principal, mas melhora o realismo, a luz, a nitidez e os detalhes.",
+    },
+    {
+      id: "image-product",
+      mode: "image",
+      label: "Mockup premium",
+      prompt:
+        "Cria um mockup fotorealista e elegante deste conceito/produto com enquadramento profissional.",
+    },
+  ],
+};
+
 const state = {
   booting: true,
   authenticating: false,
@@ -11,6 +118,7 @@ const state = {
   pendingMessage: false,
   composerText: "",
   composerAttachments: [],
+  composerMode: "auto",
   settings: null,
   users: [],
   loadingAdmin: false,
@@ -34,7 +142,7 @@ async function boot() {
       await loadChats();
     }
   } catch (error) {
-    pushToast("Falha ao iniciar a aplicação.", error.message, "error");
+    pushToast("Falha ao iniciar a aplicacao.", error.message, "error");
   } finally {
     state.booting = false;
     render();
@@ -76,6 +184,7 @@ async function api(url, options = {}) {
 async function loadChats() {
   state.loadingChats = true;
   render();
+
   try {
     const response = await api("/api/chats");
     state.chats = response.chats || [];
@@ -95,7 +204,7 @@ async function loadChats() {
       }
     }
   } catch (error) {
-    pushToast("Não foi possível carregar as conversas.", error.message, "error");
+    pushToast("Nao foi possivel carregar as conversas.", error.message, "error");
   } finally {
     state.loadingChats = false;
     render();
@@ -118,7 +227,7 @@ async function loadMessages(chatId) {
     const response = await api(`/api/chats/${chatId}/messages`);
     state.messages = response.messages || [];
   } catch (error) {
-    pushToast("Não foi possível abrir a conversa.", error.message, "error");
+    pushToast("Nao foi possivel abrir a conversa.", error.message, "error");
     state.messages = [];
   } finally {
     state.loadingMessages = false;
@@ -134,6 +243,7 @@ async function ensureAdminData() {
 
   state.loadingAdmin = true;
   render();
+
   try {
     const [settingsResponse, usersResponse] = await Promise.all([
       api("/api/settings"),
@@ -142,7 +252,7 @@ async function ensureAdminData() {
     state.settings = settingsResponse.settings;
     state.users = usersResponse.users || [];
   } catch (error) {
-    pushToast("Não foi possível carregar a administração.", error.message, "error");
+    pushToast("Nao foi possivel carregar a administracao.", error.message, "error");
   } finally {
     state.loadingAdmin = false;
     render();
@@ -164,24 +274,23 @@ function renderLoginScreen() {
   return `
     <div class="login-shell">
       <section class="hero-panel">
-        <span class="hero-tag">Workspace privado com IA e anexos</span>
-        <h1 class="hero-title">Uma experiência estilo ChatGPT, mas com controlo teu.</h1>
+        <span class="hero-tag">Workspace privado com IA, codigo e imagem</span>
+        <h1 class="hero-title">Chat, software e imagem realista numa unica app.</h1>
         <p class="hero-copy">
-          Autenticação por utilizador e palavra-passe, gestão centralizada da chave OpenAI,
-          conversas privadas por utilizador e uma área administrativa separada para configuração.
+          Autenticacao privada, anexos, geracao de codigo, HTML/CSS a partir de imagens e criacao de imagens de alta qualidade, tudo com controlo central da tua conta OpenAI.
         </p>
         <div class="hero-grid">
           <div class="hero-stat">
-            <strong>Chat</strong>
-            <span>Conversas multi-turno com histórico local e visual moderno.</span>
+            <strong>Codigo</strong>
+            <span>Gera software, corrige bugs e recria interfaces a partir de screenshots.</span>
           </div>
           <div class="hero-stat">
-            <strong>Anexos</strong>
-            <span>Imagens, PDFs e ficheiros enviados diretamente no composer.</span>
+            <strong>Imagem</strong>
+            <span>Gera e edita imagens com foco em realismo, detalhe e acabamento premium.</span>
           </div>
           <div class="hero-stat">
             <strong>Admin</strong>
-            <span>Apenas o utilizador principal entra nas configurações.</span>
+            <span>Apenas o utilizador principal pode gerir modelos, chave e acessos.</span>
           </div>
         </div>
       </section>
@@ -189,11 +298,11 @@ function renderLoginScreen() {
       <section class="auth-panel">
         <div class="brand-row">
           <div class="brand-mark">LC</div>
-          <span class="chip">Acesso seguro e centralizado</span>
+          <span class="chip">Multimodal privado</span>
         </div>
         <h2 class="panel-title">Entrar na plataforma</h2>
         <p class="panel-copy">
-          Usa as tuas credenciais para abrir o chat. O administrador principal pode também gerir utilizadores e parametrização da conta OpenAI.
+          O chat suporta texto, anexos, geracao de codigo, imagem realista e mudanca automatica de modo conforme o pedido.
         </p>
 
         <form id="login-form" class="stack">
@@ -208,7 +317,7 @@ function renderLoginScreen() {
           ${
             state.loginError
               ? `<div class="error-text">${escapeHtml(state.loginError)}</div>`
-              : `<div class="helper-text">Administrador inicial: <strong>ramoscv</strong> com a palavra-passe definida no arranque do projeto.</div>`
+              : `<div class="helper-text">Administrador inicial: <strong>ramoscv</strong> com a password definida no arranque do projeto.</div>`
           }
           <button class="button button-primary" type="submit" ${state.authenticating ? "disabled" : ""}>
             ${state.authenticating ? `<span class="spinner"></span> A autenticar...` : "Entrar"}
@@ -227,7 +336,7 @@ function renderAppShell() {
           <div class="sidebar-header">
             <div>
               <h2 class="sidebar-title">Logic Chat</h2>
-              <p class="sidebar-copy">Assistente privado com conversas por utilizador.</p>
+              <p class="sidebar-copy">Assistente privado com texto, codigo e imagem.</p>
             </div>
             <span class="hero-tag">Online</span>
           </div>
@@ -246,7 +355,7 @@ function renderAppShell() {
                 : `
                   <div class="glass-card" style="padding:18px;">
                     <strong>Ainda sem conversas</strong>
-                    <p class="helper-text">Cria a primeira conversa para começares a usar a aplicação.</p>
+                    <p class="helper-text">Cria a primeira conversa para comecares a usar a aplicacao.</p>
                   </div>
                 `
           }
@@ -263,7 +372,7 @@ function renderAppShell() {
           <div class="sidebar-actions">
             ${
               state.user.canAccessSettings
-                ? `<button class="button ${state.view === "settings" ? "button-primary" : "button-secondary"}" id="open-settings-button">Configurações</button>`
+                ? `<button class="button ${state.view === "settings" ? "button-primary" : "button-secondary"}" id="open-settings-button">Configuracoes</button>`
                 : ""
             }
             <button class="button button-ghost" id="logout-button">Sair</button>
@@ -273,19 +382,15 @@ function renderAppShell() {
 
       <section class="shell-main">
         <header class="main-header">
-          <div>
-            <div class="header-tabs">
-              <button class="tab-button ${state.view === "chat" ? "active" : ""}" id="chat-tab-button">Chat</button>
-              ${
-                state.user.canAccessSettings
-                  ? `<button class="tab-button ${state.view === "settings" ? "active" : ""}" id="settings-tab-button">Administração</button>`
-                  : ""
-              }
-            </div>
+          <div class="header-tabs">
+            <button class="tab-button ${state.view === "chat" ? "active" : ""}" id="chat-tab-button">Chat</button>
+            ${
+              state.user.canAccessSettings
+                ? `<button class="tab-button ${state.view === "settings" ? "active" : ""}" id="settings-tab-button">Administracao</button>`
+                : ""
+            }
           </div>
-          <div class="chat-meta">
-            ${state.user.canAccessSettings ? "Administrador principal" : "Utilizador autenticado"}
-          </div>
+          <div class="chat-meta">${state.user.canAccessSettings ? "Administrador principal" : "Utilizador autenticado"}</div>
         </header>
 
         <div class="main-content">
@@ -307,28 +412,23 @@ function renderChatItem(chat) {
 }
 
 function renderChatView() {
+  const publicSettings = getPublicSettings();
+  const effectiveAutoMode = detectAutoMode(state.composerText, state.composerAttachments);
+  const visibleMode = state.composerMode === "auto" ? effectiveAutoMode : state.composerMode;
+
   if (!state.activeChatId && state.chats.length === 0) {
     return `
       <div class="chat-welcome">
         <div class="welcome-card">
-          <span class="hero-tag">Experiência de conversa privada</span>
-          <h2 class="section-title">Pronto para começar</h2>
+          <span class="hero-tag">Experiencia multimodal</span>
+          <h2 class="section-title">Pronto para criar</h2>
           <p class="section-copy">
-            Podes escrever perguntas, pedir redações, analisar imagens ou anexar documentos. Cada utilizador vê apenas as suas próprias conversas.
+            Usa o modo Auto para a app escolher entre assistente, codigo ou imagem, ou seleciona manualmente quando quiseres controlar o resultado.
           </p>
           <div class="suggestions">
-            <div class="suggestion-card">
-              <strong>Prompt inicial</strong>
-              Cria um plano comercial para um novo serviço digital.
-            </div>
-            <div class="suggestion-card">
-              <strong>Com anexos</strong>
-              Resume este PDF e destaca os pontos de decisão.
-            </div>
-            <div class="suggestion-card">
-              <strong>Imagem</strong>
-              Analisa esta captura de ecrã e sugere melhorias de UX.
-            </div>
+            ${renderPresetButton(PRESETS.auto[0])}
+            ${renderPresetButton(PRESETS.auto[1])}
+            ${renderPresetButton(PRESETS.auto[2])}
           </div>
         </div>
       </div>
@@ -341,19 +441,52 @@ function renderChatView() {
         ${
           state.loadingMessages
             ? `<div class="empty-card"><span class="loading-inline"><span class="spinner"></span> A abrir a conversa...</span></div>`
-            : state.messages.map(renderMessage).join("")
+            : state.messages.length
+              ? state.messages.map(renderMessage).join("")
+              : `
+                <div class="empty-card">
+                  <span class="hero-tag">Conversa vazia</span>
+                  <h3 class="section-title" style="font-size:24px;margin-top:14px;">Escolhe um modo e envia o primeiro pedido.</h3>
+                  <p class="section-copy">Podes pedir codigo, gerar uma imagem realista ou transformar uma screenshot em HTML/CSS.</p>
+                </div>
+              `
         }
       </div>
 
       <div class="composer-wrap">
         <form id="composer-form" class="composer">
-          <div class="chat-meta">
-            Modelo atual: ${(state.settings?.defaultModel || "gpt-5.3-chat-latest")}
+          <div class="composer-head">
+            <div class="mode-switcher">
+              ${renderModeButton("auto")}
+              ${renderModeButton("assistant")}
+              ${renderModeButton("code")}
+              ${renderModeButton("image")}
+            </div>
+            <div class="chat-meta">
+              ${
+                state.composerMode === "auto"
+                  ? `Auto -> ${MODE_META[effectiveAutoMode].label}`
+                  : `${MODE_META[visibleMode].label} -> ${escapeHtml(resolveModelForMode(visibleMode, publicSettings))}`
+              }
+            </div>
+          </div>
+
+          <div class="helper-text">
+            ${escapeHtml(MODE_META[state.composerMode].hint)}
+            ${
+              state.composerMode === "auto"
+                ? ` Agora mesmo, o pedido parece cair em ${MODE_META[effectiveAutoMode].label}.`
+                : ""
+            }
+          </div>
+
+          <div class="preset-row">
+            ${getPresetsForComposer().map(renderPresetButton).join("")}
           </div>
 
           <textarea
             id="composer-textarea"
-            placeholder="Escreve a tua mensagem, cola um prompt ou pede análise de anexos..."
+            placeholder="${escapeAttribute(getComposerPlaceholder(visibleMode, state.composerMode === "auto"))}"
           >${escapeHtml(state.composerText)}</textarea>
 
           ${
@@ -377,12 +510,16 @@ function renderChatView() {
               }
             </div>
             <button class="button button-primary" type="submit" ${state.pendingMessage ? "disabled" : ""}>
-              ${state.pendingMessage ? `<span class="spinner"></span> A responder...` : "Enviar"}
+              ${
+                state.pendingMessage
+                  ? `<span class="spinner"></span> ${escapeHtml(getPendingLabel(visibleMode))}`
+                  : "Enviar"
+              }
             </button>
           </div>
 
           <div class="helper-text">
-            Suporta até 4 anexos por mensagem. Para melhor experiência, usa imagens, PDFs ou documentos leves.
+            Suporta ate 4 anexos por mensagem. Para gerar HTML/CSS a partir de uma imagem, usa o modo <strong>Codigo</strong> ou deixa em <strong>Auto</strong>.
           </div>
         </form>
       </div>
@@ -390,17 +527,51 @@ function renderChatView() {
   `;
 }
 
+function renderModeButton(mode) {
+  return `
+    <button
+      type="button"
+      class="mode-button ${state.composerMode === mode ? "active" : ""}"
+      data-mode-button="${mode}"
+    >
+      ${MODE_META[mode].label}
+    </button>
+  `;
+}
+
+function renderPresetButton(preset) {
+  return `
+    <button
+      type="button"
+      class="preset-button"
+      data-preset-id="${preset.id}"
+      data-preset-mode="${preset.mode}"
+    >
+      ${escapeHtml(preset.label)}
+    </button>
+  `;
+}
+
 function renderMessage(message) {
   const roleLabel = message.role === "user" ? "Tu" : "Assistente";
   const dimmed = message.status === "failed" ? "dimmed" : "";
+
   return `
     <article class="message-row ${message.role}">
       <div class="message-bubble">
         <div class="message-head">
           <span class="message-role">${roleLabel}</span>
-          <span class="message-time">${formatDateTime(message.createdAt)}</span>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span class="mini-badge">${escapeHtml(modeBadgeLabel(message.mode))}</span>
+            <span class="message-time">${formatDateTime(message.createdAt)}</span>
+          </div>
         </div>
-        <div class="message-text ${dimmed}">${escapeHtml(message.text || "")}</div>
+        ${
+          message.model
+            ? `<div class="helper-text" style="margin-bottom:10px;">Modelo: ${escapeHtml(message.model)}</div>`
+            : ""
+        }
+        <div class="message-text ${dimmed}">${renderRichText(message.text || "")}</div>
         ${
           message.attachments?.length
             ? `<div class="attachments">${message.attachments.map(renderSavedAttachment).join("")}</div>`
@@ -412,12 +583,17 @@ function renderMessage(message) {
 }
 
 function renderSavedAttachment(attachment) {
-  const preview = attachment.kind === "image"
+  const isImage = attachment.kind === "image" || attachment.kind === "generated-image";
+  const className = attachment.kind === "generated-image"
+    ? "attachment-card generated-image-card"
+    : "attachment-card";
+
+  const preview = isImage
     ? `<img src="${attachment.url}" alt="${escapeHtml(attachment.name)}" />`
     : `<div class="avatar" style="width:52px;height:52px;border-radius:12px;">${escapeHtml(iconForAttachment(attachment.name))}</div>`;
 
   return `
-    <a class="attachment-card" href="${attachment.url}" target="_blank" rel="noreferrer">
+    <a class="${className}" href="${attachment.url}" target="_blank" rel="noreferrer">
       ${preview}
       <div class="attachment-details">
         <div class="attachment-name">${escapeHtml(attachment.name)}</div>
@@ -431,7 +607,7 @@ function renderPendingAttachment(attachment, index) {
   return `
     <div class="attachment-pill">
       <span>${escapeHtml(attachment.name)}</span>
-      <button type="button" data-remove-attachment="${index}" aria-label="Remover anexo">✕</button>
+      <button type="button" data-remove-attachment="${index}" aria-label="Remover anexo">x</button>
     </div>
   `;
 }
@@ -442,7 +618,7 @@ function renderSettingsView() {
       <div class="empty-state">
         <div class="empty-card">
           <h2 class="section-title">Acesso restrito</h2>
-          <p class="section-copy">Esta área está reservada ao utilizador administrador principal.</p>
+          <p class="section-copy">Esta area esta reservada ao utilizador administrador principal.</p>
         </div>
       </div>
     `;
@@ -452,29 +628,36 @@ function renderSettingsView() {
     return `
       <div class="empty-state">
         <div class="empty-card">
-          <span class="loading-inline"><span class="spinner"></span> A carregar configuração...</span>
+          <span class="loading-inline"><span class="spinner"></span> A carregar configuracao...</span>
         </div>
       </div>
     `;
   }
 
-  const settings = state.settings || {
+  const settings = {
     assistantName: "Logic Chat",
-    defaultModel: "gpt-5.3-chat-latest",
+    defaultModel: "gpt-5.5",
+    codeModel: "gpt-5.5",
+    imageOutputModel: "gpt-image-2",
     systemPrompt: "",
+    codeSystemPrompt: "",
+    imageSystemPrompt: "",
     reasoningEffort: "medium",
-    maxOutputTokens: 2200,
+    maxOutputTokens: 4000,
+    imageSize: "1536x1024",
+    imageQuality: "high",
     maskedApiKey: "Nao definida",
     hasApiKey: false,
+    ...(state.settings || {}),
   };
 
   return `
     <div class="settings-grid">
       <section>
-        <span class="hero-tag">Configuração da conta OpenAI</span>
-        <h2 class="section-title">Parâmetros da experiência</h2>
+        <span class="hero-tag">Conta OpenAI e modos</span>
+        <h2 class="section-title">Parametros da experiencia</h2>
         <p class="section-copy">
-          Aqui controlas o modelo usado, a identidade do assistente, o prompt de sistema e a chave que fica guardada apenas no backend.
+          Sugestao atual baseada nas docs oficiais: <strong>gpt-5.5</strong> para assistente e codigo, e <strong>gpt-image-2</strong> para imagem realista.
         </p>
 
         <form id="settings-form" class="stack">
@@ -484,11 +667,19 @@ function renderSettingsView() {
               <input id="assistant-name" class="input" name="assistantName" value="${escapeAttribute(settings.assistantName)}" />
             </div>
             <div class="field">
-              <label for="default-model">Modelo</label>
+              <label for="default-model">Modelo do assistente</label>
               <input id="default-model" class="input" name="defaultModel" value="${escapeAttribute(settings.defaultModel)}" />
             </div>
             <div class="field">
-              <label for="reasoning-effort">Esforço de raciocínio</label>
+              <label for="code-model">Modelo de codigo</label>
+              <input id="code-model" class="input" name="codeModel" value="${escapeAttribute(settings.codeModel)}" />
+            </div>
+            <div class="field">
+              <label for="image-output-model">Modelo de imagem</label>
+              <input id="image-output-model" class="input" name="imageOutputModel" value="${escapeAttribute(settings.imageOutputModel)}" />
+            </div>
+            <div class="field">
+              <label for="reasoning-effort">Esforco de raciocinio</label>
               <select id="reasoning-effort" class="select" name="reasoningEffort">
                 ${["minimal", "low", "medium", "high", "xhigh"].map((value) => `
                   <option value="${value}" ${settings.reasoningEffort === value ? "selected" : ""}>${value}</option>
@@ -497,34 +688,58 @@ function renderSettingsView() {
             </div>
             <div class="field">
               <label for="max-output-tokens">Max output tokens</label>
-              <input id="max-output-tokens" class="input" name="maxOutputTokens" type="number" min="256" max="12000" value="${escapeAttribute(String(settings.maxOutputTokens || 2200))}" />
+              <input id="max-output-tokens" class="input" name="maxOutputTokens" type="number" min="256" max="12000" value="${escapeAttribute(String(settings.maxOutputTokens || 4000))}" />
+            </div>
+            <div class="field">
+              <label for="image-size">Tamanho da imagem</label>
+              <select id="image-size" class="select" name="imageSize">
+                ${["1024x1024", "1024x1536", "1536x1024", "auto"].map((value) => `
+                  <option value="${value}" ${settings.imageSize === value ? "selected" : ""}>${value}</option>
+                `).join("")}
+              </select>
+            </div>
+            <div class="field">
+              <label for="image-quality">Qualidade da imagem</label>
+              <select id="image-quality" class="select" name="imageQuality">
+                ${["low", "medium", "high", "auto"].map((value) => `
+                  <option value="${value}" ${settings.imageQuality === value ? "selected" : ""}>${value}</option>
+                `).join("")}
+              </select>
             </div>
             <div class="field wide">
-              <label for="system-prompt">Prompt de sistema</label>
+              <label for="system-prompt">Prompt base do assistente</label>
               <textarea id="system-prompt" class="textarea" name="systemPrompt">${escapeHtml(settings.systemPrompt || "")}</textarea>
+            </div>
+            <div class="field wide">
+              <label for="code-system-prompt">Prompt do modo codigo</label>
+              <textarea id="code-system-prompt" class="textarea" name="codeSystemPrompt">${escapeHtml(settings.codeSystemPrompt || "")}</textarea>
+            </div>
+            <div class="field wide">
+              <label for="image-system-prompt">Prompt do modo imagem</label>
+              <textarea id="image-system-prompt" class="textarea" name="imageSystemPrompt">${escapeHtml(settings.imageSystemPrompt || "")}</textarea>
             </div>
             <div class="field wide">
               <label for="api-key">API key OpenAI</label>
               <input id="api-key" class="input" name="openAiApiKey" type="password" placeholder="Deixa vazio para manter a chave atual" />
               <div class="helper-text">
-                Estado atual: <strong>${settings.hasApiKey ? escapeHtml(settings.maskedApiKey) : "Não definida"}</strong>
+                Estado atual: <strong>${settings.hasApiKey ? escapeHtml(settings.maskedApiKey) : "Nao definida"}</strong>
               </div>
             </div>
           </div>
 
           <div class="sidebar-actions">
             <button class="button button-primary" type="submit" ${state.savingSettings ? "disabled" : ""}>
-              ${state.savingSettings ? `<span class="spinner"></span> A guardar...` : "Guardar configurações"}
+              ${state.savingSettings ? `<span class="spinner"></span> A guardar...` : "Guardar configuracoes"}
             </button>
           </div>
         </form>
       </section>
 
       <section>
-        <span class="hero-tag">Gestão de utilizadores</span>
-        <h2 class="section-title">Acessos à aplicação</h2>
+        <span class="hero-tag">Gestao de utilizadores</span>
+        <h2 class="section-title">Acessos a aplicacao</h2>
         <p class="section-copy">
-          O utilizador <strong>ramoscv</strong> mantém acesso exclusivo às configurações. Os restantes utilizadores entram apenas na área de chat.
+          O utilizador <strong>ramoscv</strong> mantem acesso exclusivo a configuracoes. Os restantes utilizadores entram apenas na experiencia de chat.
         </p>
 
         <div class="users-list">
@@ -651,10 +866,26 @@ function bindEvents() {
     });
   });
 
+  document.querySelectorAll("[data-mode-button]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.composerMode = button.dataset.modeButton;
+      render();
+    });
+  });
+
+  document.querySelectorAll("[data-preset-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      applyPreset(button.dataset.presetId, button.dataset.presetMode);
+    });
+  });
+
   const composerTextarea = document.querySelector("#composer-textarea");
   if (composerTextarea) {
     composerTextarea.addEventListener("input", (event) => {
       state.composerText = event.target.value;
+      if (state.composerMode === "auto") {
+        updateModeSummaryMeta();
+      }
     });
   }
 
@@ -704,6 +935,20 @@ function bindEvents() {
   });
 }
 
+function updateModeSummaryMeta() {
+  const chatMeta = document.querySelector(".composer .chat-meta");
+  if (!chatMeta) {
+    return;
+  }
+
+  if (state.composerMode !== "auto") {
+    return;
+  }
+
+  const effective = detectAutoMode(state.composerText, state.composerAttachments);
+  chatMeta.textContent = `Auto -> ${MODE_META[effective].label}`;
+}
+
 async function handleLoginSubmit(event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
@@ -724,8 +969,9 @@ async function handleLoginSubmit(event) {
     state.view = "chat";
     state.composerText = "";
     state.composerAttachments = [];
+    state.composerMode = "auto";
     await loadChats();
-    pushToast("Sessão iniciada", "Bem-vindo à plataforma.", "info");
+    pushToast("Sessao iniciada", "Bem-vindo a plataforma.", "info");
   } catch (error) {
     state.loginError = error.message;
   } finally {
@@ -749,6 +995,7 @@ async function handleLogout() {
     view: "chat",
     composerText: "",
     composerAttachments: [],
+    composerMode: "auto",
     settings: null,
     users: [],
     loginError: "",
@@ -758,14 +1005,18 @@ async function handleLogout() {
 
 async function handleNewChat() {
   try {
-    const response = await api("/api/chats", { method: "POST", body: { title: "Nova conversa" } });
+    const response = await api("/api/chats", {
+      method: "POST",
+      body: { title: "Nova conversa" },
+    });
     state.chats = [response.chat, ...state.chats];
     state.activeChatId = response.chat.id;
     state.messages = [];
     state.view = "chat";
+    state.composerMode = "auto";
     render();
   } catch (error) {
-    pushToast("Não foi possível criar a conversa.", error.message, "error");
+    pushToast("Nao foi possivel criar a conversa.", error.message, "error");
   }
 }
 
@@ -778,12 +1029,15 @@ async function handleSendMessage(event) {
   let chatId = state.activeChatId;
   if (!chatId) {
     try {
-      const response = await api("/api/chats", { method: "POST", body: { title: "Nova conversa" } });
+      const response = await api("/api/chats", {
+        method: "POST",
+        body: { title: "Nova conversa" },
+      });
       state.chats = [response.chat, ...state.chats];
       state.activeChatId = response.chat.id;
       chatId = response.chat.id;
     } catch (error) {
-      pushToast("Não foi possível preparar a conversa.", error.message, "error");
+      pushToast("Nao foi possivel preparar a conversa.", error.message, "error");
       return;
     }
   }
@@ -795,6 +1049,11 @@ async function handleSendMessage(event) {
     return;
   }
 
+  const requestedMode = state.composerMode;
+  const effectiveMode = requestedMode === "auto"
+    ? detectAutoMode(text, attachments)
+    : requestedMode;
+
   state.pendingMessage = true;
   state.composerText = "";
   state.composerAttachments = [];
@@ -802,6 +1061,7 @@ async function handleSendMessage(event) {
   const optimisticUserMessage = {
     id: `temp-user-${Date.now()}`,
     role: "user",
+    mode: effectiveMode,
     text,
     status: "sending",
     createdAt: new Date().toISOString(),
@@ -817,7 +1077,8 @@ async function handleSendMessage(event) {
   const optimisticAssistantMessage = {
     id: `temp-assistant-${Date.now()}`,
     role: "assistant",
-    text: "A gerar resposta...",
+    mode: effectiveMode,
+    text: getOptimisticAssistantText(effectiveMode),
     status: "sending",
     createdAt: new Date().toISOString(),
     attachments: [],
@@ -833,6 +1094,7 @@ async function handleSendMessage(event) {
       body: {
         text,
         attachments,
+        mode: requestedMode,
       },
     });
 
@@ -847,7 +1109,7 @@ async function handleSendMessage(event) {
     state.messages = state.messages.filter((message) => !String(message.id).startsWith("temp-"));
     state.composerText = text;
     state.composerAttachments = attachments;
-    pushToast("Não foi possível enviar a mensagem.", error.message, "error");
+    pushToast("Nao foi possivel enviar a mensagem.", error.message, "error");
   } finally {
     state.pendingMessage = false;
     render();
@@ -858,12 +1120,13 @@ async function handleSendMessage(event) {
 async function handleAttachmentSelection(event) {
   const files = Array.from(event.target.files || []);
   event.target.value = "";
+
   if (!files.length) {
     return;
   }
 
   if (state.composerAttachments.length + files.length > 4) {
-    pushToast("Limite de anexos", "Podes manter no máximo 4 anexos por mensagem.", "error");
+    pushToast("Limite de anexos", "Podes manter no maximo 4 anexos por mensagem.", "error");
     return;
   }
 
@@ -896,9 +1159,9 @@ async function handleDeleteChat() {
       state.messages = [];
       render();
     }
-    pushToast("Conversa apagada", "A conversa foi removida da aplicação.", "info");
+    pushToast("Conversa apagada", "A conversa foi removida da aplicacao.", "info");
   } catch (error) {
-    pushToast("Não foi possível apagar a conversa.", error.message, "error");
+    pushToast("Nao foi possivel apagar a conversa.", error.message, "error");
   }
 }
 
@@ -914,14 +1177,20 @@ async function handleSaveSettings(event) {
       body: {
         assistantName: form.get("assistantName"),
         defaultModel: form.get("defaultModel"),
+        codeModel: form.get("codeModel"),
+        imageOutputModel: form.get("imageOutputModel"),
         systemPrompt: form.get("systemPrompt"),
+        codeSystemPrompt: form.get("codeSystemPrompt"),
+        imageSystemPrompt: form.get("imageSystemPrompt"),
         openAiApiKey: form.get("openAiApiKey"),
         reasoningEffort: form.get("reasoningEffort"),
         maxOutputTokens: Number(form.get("maxOutputTokens")),
+        imageSize: form.get("imageSize"),
+        imageQuality: form.get("imageQuality"),
       },
     });
     state.settings = response.settings;
-    pushToast("Configurações guardadas", "A parametrização da OpenAI foi atualizada.", "info");
+    pushToast("Configuracoes guardadas", "A parametrizacao da OpenAI foi atualizada.", "info");
   } catch (error) {
     pushToast("Falha ao guardar", error.message, "error");
   } finally {
@@ -947,9 +1216,9 @@ async function handleCreateUser(event) {
     });
     state.users = [...state.users, response.user];
     event.currentTarget.reset();
-    pushToast("Utilizador criado", `${response.user.displayName} já pode iniciar sessão.`, "info");
+    pushToast("Utilizador criado", `${response.user.displayName} ja pode iniciar sessao.`, "info");
   } catch (error) {
-    pushToast("Não foi possível criar o utilizador.", error.message, "error");
+    pushToast("Nao foi possivel criar o utilizador.", error.message, "error");
   } finally {
     state.creatingUser = false;
     render();
@@ -973,7 +1242,7 @@ async function handleToggleUser(userId) {
     pushToast("Utilizador atualizado", `${response.user.displayName} foi atualizado.`, "info");
     render();
   } catch (error) {
-    pushToast("Não foi possível atualizar o utilizador.", error.message, "error");
+    pushToast("Nao foi possivel atualizar o utilizador.", error.message, "error");
   }
 }
 
@@ -994,7 +1263,7 @@ async function handleDeleteUser(userId) {
     pushToast("Utilizador removido", "O acesso e os dados do utilizador foram eliminados.", "info");
     render();
   } catch (error) {
-    pushToast("Não foi possível apagar o utilizador.", error.message, "error");
+    pushToast("Nao foi possivel apagar o utilizador.", error.message, "error");
   }
 }
 
@@ -1020,7 +1289,7 @@ async function handleResetPassword(userId) {
     pushToast("Password reposta", `A palavra-passe de ${response.user.displayName} foi atualizada.`, "info");
     render();
   } catch (error) {
-    pushToast("Não foi possível repor a password.", error.message, "error");
+    pushToast("Nao foi possivel repor a password.", error.message, "error");
   }
 }
 
@@ -1041,7 +1310,192 @@ function upsertChat(chat) {
   }
 
   state.chats[existingIndex] = chat;
-  state.chats = [...state.chats].sort((left, right) => new Date(right.updatedAt) - new Date(left.updatedAt));
+  state.chats = [...state.chats].sort(
+    (left, right) => new Date(right.updatedAt) - new Date(left.updatedAt),
+  );
+}
+
+function applyPreset(presetId, presetMode) {
+  const allPresets = [
+    ...PRESETS.auto,
+    ...PRESETS.assistant,
+    ...PRESETS.code,
+    ...PRESETS.image,
+  ];
+  const preset = allPresets.find((entry) => entry.id === presetId);
+  if (!preset) {
+    return;
+  }
+
+  state.composerMode = presetMode || preset.mode || state.composerMode;
+  state.composerText = state.composerText.trim()
+    ? `${state.composerText.trim()}\n\n${preset.prompt}`
+    : preset.prompt;
+  render();
+
+  const textarea = document.querySelector("#composer-textarea");
+  if (textarea) {
+    textarea.focus();
+    textarea.selectionStart = textarea.selectionEnd = textarea.value.length;
+  }
+}
+
+function getPresetsForComposer() {
+  return PRESETS[state.composerMode] || PRESETS.auto;
+}
+
+function getComposerPlaceholder(visibleMode, isAuto) {
+  if (isAuto) {
+    return "Escreve o pedido. A app pode mudar automaticamente para codigo ou imagem conforme o contexto...";
+  }
+
+  if (visibleMode === "code") {
+    return "Pede codigo de software, cola um bug, ou anexa uma imagem para gerar HTML/CSS...";
+  }
+
+  if (visibleMode === "image") {
+    return "Descreve a imagem que queres gerar ou anexa uma imagem para editar e melhorar...";
+  }
+
+  return "Escreve a tua mensagem, analisa anexos, resume documentos ou pede apoio geral...";
+}
+
+function getPendingLabel(mode) {
+  if (mode === "code") {
+    return "A escrever codigo...";
+  }
+  if (mode === "image") {
+    return "A gerar imagem...";
+  }
+  return "A responder...";
+}
+
+function getOptimisticAssistantText(mode) {
+  if (mode === "code") {
+    return "A preparar uma resposta tecnica e codigo pronto a usar...";
+  }
+  if (mode === "image") {
+    return "A gerar ou editar a imagem...";
+  }
+  return "A gerar resposta...";
+}
+
+function getPublicSettings() {
+  return {
+    assistantName: "Logic Chat",
+    defaultModel: "gpt-5.5",
+    codeModel: "gpt-5.5",
+    imageOutputModel: "gpt-image-2",
+    imageQuality: "high",
+    imageSize: "1536x1024",
+    ...(state.settings || {}),
+  };
+}
+
+function resolveModelForMode(mode, settings = getPublicSettings()) {
+  if (mode === "code") {
+    return settings.codeModel || settings.defaultModel;
+  }
+  if (mode === "image") {
+    return settings.imageOutputModel;
+  }
+  return settings.defaultModel;
+}
+
+function detectAutoMode(text, attachments) {
+  const lowered = String(text || "").toLowerCase();
+  const hasImageAttachment = attachments.some((attachment) =>
+    String(attachment.type || attachment.mimeType || "").toLowerCase().startsWith("image/"),
+  );
+
+  const imageIntent = [
+    /gera(?:r)?\s+uma?\s+imagem/,
+    /cria(?:r)?\s+uma?\s+imagem/,
+    /fotoreal/,
+    /realistic/,
+    /mockup/,
+    /render/,
+    /editar?\s+a?\s+imagem/,
+    /melhora(?:r)?\s+o\s+realismo/,
+  ];
+
+  const codeIntent = [
+    /\bhtml\b/,
+    /\bcss\b/,
+    /\bjavascript\b/,
+    /\btypescript\b/,
+    /\bpython\b/,
+    /\breact\b/,
+    /\bnode\b/,
+    /\bapi\b/,
+    /\bcodigo\b/,
+    /\bsoftware\b/,
+    /\bapp\b/,
+    /\bbug\b/,
+    /\brefactor/,
+    /\binterface\b/,
+    /\bscreenshot\b/,
+    /\bwireframe\b/,
+    /\blanding page\b/,
+  ];
+
+  if (hasImageAttachment && codeIntent.some((pattern) => pattern.test(lowered))) {
+    return "code";
+  }
+
+  if (imageIntent.some((pattern) => pattern.test(lowered))) {
+    return "image";
+  }
+
+  if (codeIntent.some((pattern) => pattern.test(lowered))) {
+    return "code";
+  }
+
+  return "assistant";
+}
+
+function modeBadgeLabel(mode) {
+  return MODE_META[mode]?.label || MODE_META.assistant.label;
+}
+
+function renderRichText(text) {
+  const source = String(text || "");
+  if (!source) {
+    return "";
+  }
+
+  const codeFencePattern = /```([\w.+-]+)?\n([\s\S]*?)```/g;
+  let output = "";
+  let cursor = 0;
+  let match = codeFencePattern.exec(source);
+
+  while (match) {
+    output += renderParagraphSegment(source.slice(cursor, match.index));
+    output += `
+      <div class="code-block">
+        <div class="code-header">${escapeHtml(match[1] || "code")}</div>
+        <pre><code>${escapeHtml(match[2].replace(/\n$/, ""))}</code></pre>
+      </div>
+    `;
+    cursor = match.index + match[0].length;
+    match = codeFencePattern.exec(source);
+  }
+
+  output += renderParagraphSegment(source.slice(cursor));
+  return output;
+}
+
+function renderParagraphSegment(segment) {
+  if (!segment) {
+    return "";
+  }
+
+  return segment
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
+    .join("");
 }
 
 function fileToDataUrl(file) {
@@ -1091,6 +1545,7 @@ function formatDateTime(value) {
   if (!value) {
     return "";
   }
+
   return new Intl.DateTimeFormat("pt-PT", {
     dateStyle: "short",
     timeStyle: "short",
@@ -1101,6 +1556,7 @@ function formatDate(value) {
   if (!value) {
     return "";
   }
+
   return new Intl.DateTimeFormat("pt-PT", {
     day: "2-digit",
     month: "short",
