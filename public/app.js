@@ -278,9 +278,9 @@ function renderLoginScreen() {
     <div class="login-shell">
       <section class="hero-panel">
         <span class="hero-tag">Workspace privado com IA, codigo e imagem</span>
-        <h1 class="hero-title">Chat, software e imagem realista numa unica app.</h1>
+        <h1 class="hero-title">Uma plataforma privada de IA com controlo centralizado e execução profissional.</h1>
         <p class="hero-copy">
-          Autenticacao privada, anexos, geracao de codigo, HTML/CSS a partir de imagens e criacao de imagens de alta qualidade, tudo com controlo central da tua conta OpenAI.
+          Acesso seguro por utilizador e palavra-passe, gestão centralizada da conta OpenAI, conversas privadas por utilizador e uma área administrativa dedicada à configuração, governação e controlo operacional da aplicação.
         </p>
         <div class="hero-grid">
           <div class="hero-stat">
@@ -321,7 +321,7 @@ function renderLoginScreen() {
           ${
             state.loginError
               ? `<div class="error-text">${escapeHtml(state.loginError)}</div>`
-              : `<div class="helper-text">Administrador inicial: <strong>ramoscv</strong> com a password definida no arranque do projeto.</div>`
+              : ``
           }
           <button class="button button-primary" type="submit" ${state.authenticating ? "disabled" : ""}>
             ${state.authenticating ? `<span class="spinner"></span> A autenticar...` : "Entrar"}
@@ -890,6 +890,13 @@ function bindEvents() {
       state.composerText = event.target.value;
       if (state.composerMode === "auto") {
         updateModeSummaryMeta();
+      }
+    });
+
+    composerTextarea.addEventListener("keydown", (event) => {
+      if (event.ctrlKey && event.key === "Enter") {
+        event.preventDefault();
+        document.querySelector("#composer-form")?.requestSubmit();
       }
     });
   }
