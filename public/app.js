@@ -1,5 +1,6 @@
 const APP_NAME = "Private ChatGPT Pro";
 const APP_SIGNATURE = "by Carlos Ramos";
+const MOBILE_SIDEBAR_BREAKPOINT = 1040;
 
 const MODE_META = {
   auto: {
@@ -122,6 +123,7 @@ const state = {
   composerText: "",
   composerAttachments: [],
   composerMode: "auto",
+  mobileSidebarOpen: false,
   settings: null,
   users: [],
   loadingAdmin: false,
@@ -334,7 +336,13 @@ function renderLoginScreen() {
 
 function renderAppShell() {
   return `
-    <div class="app-shell">
+    <div class="app-shell ${state.mobileSidebarOpen ? "mobile-sidebar-open" : ""}">
+      <button
+        type="button"
+        id="sidebar-backdrop"
+        class="sidebar-backdrop"
+        aria-label="Fechar menu lateral"
+      ></button>
       <aside class="shell-sidebar">
         <div>
           <div class="sidebar-header">
@@ -343,7 +351,17 @@ function renderAppShell() {
               <div class="profile-meta" style="margin-top:4px;">${APP_SIGNATURE}</div>
               <p class="sidebar-copy">Assistente privado com texto, codigo e imagem.</p>
             </div>
-            <span class="hero-tag">Online</span>
+            <div class="sidebar-header-actions">
+              <span class="hero-tag">Online</span>
+              <button
+                type="button"
+                id="close-sidebar-button"
+                class="icon-button sidebar-close-button"
+                aria-label="Fechar menu"
+              >
+                ×
+              </button>
+            </div>
           </div>
 
           <div class="sidebar-actions" style="margin-top:18px;">
@@ -387,13 +405,23 @@ function renderAppShell() {
 
       <section class="shell-main">
         <header class="main-header">
-          <div class="header-tabs">
-            <button class="tab-button ${state.view === "chat" ? "active" : ""}" id="chat-tab-button">Chat</button>
-            ${
-              state.user.canAccessSettings
-                ? `<button class="tab-button ${state.view === "settings" ? "active" : ""}" id="settings-tab-button">Administracao</button>`
-                : ""
-            }
+          <div class="main-header-left">
+            <button
+              type="button"
+              id="open-sidebar-button"
+              class="icon-button mobile-nav-button"
+              aria-label="Abrir menu"
+            >
+              Conversas
+            </button>
+            <div class="header-tabs">
+              <button class="tab-button ${state.view === "chat" ? "active" : ""}" id="chat-tab-button">Chat</button>
+              ${
+                state.user.canAccessSettings
+                  ? `<button class="tab-button ${state.view === "settings" ? "active" : ""}" id="settings-tab-button">Administracao</button>`
+                  : ""
+              }
+            </div>
           </div>
           <div class="chat-meta">${state.user.canAccessSettings ? "Administrador principal" : "Utilizador autenticado"}</div>
         </header>
@@ -845,6 +873,21 @@ function bindEvents() {
     newChatButton.addEventListener("click", handleNewChat);
   }
 
+  const openSidebarButton = document.querySelector("#open-sidebar-button");
+  if (openSidebarButton) {
+    openSidebarButton.addEventListener("click", openMobileSidebar);
+  }
+
+  const closeSidebarButton = document.querySelector("#close-sidebar-button");
+  if (closeSidebarButton) {
+    closeSidebarButton.addEventListener("click", closeMobileSidebar);
+  }
+
+  const sidebarBackdrop = document.querySelector("#sidebar-backdrop");
+  if (sidebarBackdrop) {
+    sidebarBackdrop.addEventListener("click", closeMobileSidebar);
+  }
+
   const logoutButton = document.querySelector("#logout-button");
   if (logoutButton) {
     logoutButton.addEventListener("click", handleLogout);
@@ -854,6 +897,7 @@ function bindEvents() {
   if (chatTabButton) {
     chatTabButton.addEventListener("click", () => {
       state.view = "chat";
+      closeMobileSidebar();
       render();
     });
   }
@@ -862,6 +906,7 @@ function bindEvents() {
   if (openSettingsButton) {
     openSettingsButton.addEventListener("click", async () => {
       state.view = "settings";
+      closeMobileSidebar();
       render();
       await ensureAdminData();
     });
@@ -871,6 +916,7 @@ function bindEvents() {
   if (settingsTabButton) {
     settingsTabButton.addEventListener("click", async () => {
       state.view = "settings";
+      closeMobileSidebar();
       render();
       await ensureAdminData();
     });
@@ -879,6 +925,7 @@ function bindEvents() {
   document.querySelectorAll("[data-chat-id]").forEach((button) => {
     button.addEventListener("click", async () => {
       await loadMessages(button.dataset.chatId);
+      closeMobileSidebar();
     });
   });
 
@@ -1015,6 +1062,7 @@ async function handleLoginSubmit(event) {
     state.composerText = "";
     state.composerAttachments = [];
     state.composerMode = "auto";
+    state.mobileSidebarOpen = false;
     await loadChats();
     pushToast("Sessao iniciada", "Bem-vindo a plataforma.", "info");
   } catch (error) {
@@ -1041,6 +1089,7 @@ async function handleLogout() {
     composerText: "",
     composerAttachments: [],
     composerMode: "auto",
+    mobileSidebarOpen: false,
     settings: null,
     users: [],
     loginError: "",
@@ -1059,6 +1108,7 @@ async function handleNewChat() {
     state.messages = [];
     state.view = "chat";
     state.composerMode = "auto";
+    closeMobileSidebar();
     render();
   } catch (error) {
     pushToast("Nao foi possivel criar a conversa.", error.message, "error");
@@ -1711,4 +1761,26 @@ function scrollMessagesToBottom() {
       feed.scrollTop = feed.scrollHeight;
     }
   });
+}
+
+function isMobileViewport() {
+  return window.innerWidth <= MOBILE_SIDEBAR_BREAKPOINT;
+}
+
+function openMobileSidebar() {
+  if (!isMobileViewport()) {
+    return;
+  }
+
+  state.mobileSidebarOpen = true;
+  render();
+}
+
+function closeMobileSidebar() {
+  if (!state.mobileSidebarOpen) {
+    return;
+  }
+
+  state.mobileSidebarOpen = false;
+  render();
 }
