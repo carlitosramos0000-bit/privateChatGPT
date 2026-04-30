@@ -1717,24 +1717,12 @@ async function startRealtimeVoiceConversation() {
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
 
-    const response = await fetch("/api/realtime/session", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/sdp",
-      },
-      credentials: "same-origin",
-      body: offer.sdp,
-    });
-
-    if (!response.ok) {
-      const contentType = response.headers.get("content-type") || "";
-      const errorMessage = contentType.includes("application/json")
-        ? (await response.json().catch(() => ({}))).error
-        : await response.text().catch(() => "");
-      throw new Error(errorMessage || "Nao foi possivel abrir a sessao de voz ao vivo.");
+    const offerSdp = String(peerConnection.localDescription?.sdp || offer.sdp || "").trim();
+    if (!offerSdp || !offerSdp.startsWith("v=")) {
+      throw new Error("O browser nao conseguiu gerar um SDP valido para a conversa ao vivo.");
     }
 
-    const answerSdp = await response.text();
+    const answerSdp = await negotiateRealtimeVoiceAnswerSdp(offerSdp);
     await peerConnection.setRemoteDescription({
       type: "answer",
       sdp: answerSdp,
@@ -1785,6 +1773,68 @@ function stopRealtimeVoiceConversation(silent = false) {
     state.liveVoiceError = "";
     render();
   }
+}
+
+async function negotiateRealtimeVoiceAnswerSdp(offerSdp) {
+  const ephemeralToken = await fetchRealtimeClientSecret();
+  if (ephemeralToken) {
+    try {
+      return await requestRealtimeAnswerDirectly(ephemeralToken, offerSdp);
+    } catch (error) {
+      console.warn("Realtime direto com client secret falhou, a tentar fallback pelo backend.", error);
+    }
+  }
+
+  return requestRealtimeAnswerViaBackend(offerSdp);
+}
+
+async function fetchRealtimeClientSecret() {
+  try {
+    const data = await api("/api/realtime/token");
+    return String(data?.value || data?.client_secret?.value || "").trim();
+  } catch (error) {
+    console.warn("Nao foi possivel obter client secret Realtime.", error);
+    return "";
+  }
+}
+
+async function requestRealtimeAnswerDirectly(ephemeralToken, offerSdp) {
+  const response = await fetch("https://api.openai.com/v1/realtime/calls", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${ephemeralToken}`,
+      "Content-Type": "application/sdp",
+    },
+    body: offerSdp,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(errorText || "A OpenAI recusou a sessao WebRTC direta.");
+  }
+
+  return response.text();
+}
+
+async function requestRealtimeAnswerViaBackend(offerSdp) {
+  const response = await fetch("/api/realtime/session", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/sdp",
+    },
+    credentials: "same-origin",
+    body: offerSdp,
+  });
+
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") || "";
+    const errorMessage = contentType.includes("application/json")
+      ? (await response.json().catch(() => ({}))).error
+      : await response.text().catch(() => "");
+    throw new Error(errorMessage || "Nao foi possivel abrir a sessao de voz ao vivo.");
+  }
+
+  return response.text();
 }
 
 function handleRealtimeVoiceServerEvent(messageEvent, session) {

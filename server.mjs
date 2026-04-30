@@ -460,6 +460,12 @@ async function handleApi(req, res, url, method) {
     return;
   }
 
+  if (url.pathname === "/api/realtime/token" && method === "GET") {
+    const tokenPayload = await requestRealtimeClientSecret(user);
+    sendJson(res, 200, tokenPayload);
+    return;
+  }
+
   if (url.pathname === "/api/chats" && method === "GET") {
     sendJson(res, 200, {
       chats: listChatsForUser(user.id),
@@ -1644,6 +1650,32 @@ async function requestRealtimeSessionAnswer({ user, offerSdp }) {
   }
 
   throw lastError || new Error("Nao foi possivel iniciar a sessao Realtime.");
+}
+
+async function requestRealtimeClientSecret(user) {
+  const apiKey = getOpenAiApiKey();
+  const sessionConfigs = [
+    { session: buildRealtimeSessionConfig(user) },
+    { session: buildRealtimeSessionCompatConfig() },
+  ];
+  let lastError = null;
+
+  for (const payload of sessionConfigs) {
+    try {
+      return await callOpenAiJson({
+        apiKey,
+        endpoint: "https://api.openai.com/v1/realtime/client_secrets",
+        payload,
+      });
+    } catch (error) {
+      lastError = error;
+      if (!shouldRetryRealtimeSessionConfig(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error("Nao foi possivel criar o client secret Realtime.");
 }
 
 function buildRealtimeSessionConfig(user) {
