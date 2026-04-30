@@ -1,6 +1,7 @@
 const APP_NAME = "Private ChatGPT Pro";
 const APP_SIGNATURE = "by Carlos Ramos";
 const MOBILE_SIDEBAR_BREAKPOINT = 1040;
+let globalEventsBound = false;
 
 const MODE_META = {
   auto: {
@@ -138,6 +139,11 @@ const app = document.querySelector("#app");
 boot();
 
 async function boot() {
+  if (!globalEventsBound) {
+    bindGlobalEvents();
+    globalEventsBound = true;
+  }
+
   render();
   try {
     const response = await api("/api/me");
@@ -359,7 +365,7 @@ function renderAppShell() {
                 class="icon-button sidebar-close-button"
                 aria-label="Fechar menu"
               >
-                ×
+                X
               </button>
             </div>
           </div>
@@ -412,7 +418,7 @@ function renderAppShell() {
               class="icon-button mobile-nav-button"
               aria-label="Abrir menu"
             >
-              Conversas
+              Chats
             </button>
             <div class="header-tabs">
               <button class="tab-button ${state.view === "chat" ? "active" : ""}" id="chat-tab-button">Chat</button>
@@ -449,6 +455,9 @@ function renderChatView() {
   const effectiveAutoMode = detectAutoMode(state.composerText, state.composerAttachments);
   const visibleMode = state.composerMode === "auto" ? effectiveAutoMode : state.composerMode;
   const imageModeNote = getImageModeNote(publicSettings.imageOutputModel);
+  const activeChat = state.chats.find((chat) => chat.id === state.activeChatId) || null;
+  const messageCountLabel =
+    state.messages.length === 1 ? "1 mensagem" : `${state.messages.length} mensagens`;
 
   if (!state.activeChatId && state.chats.length === 0) {
     return `
@@ -471,6 +480,11 @@ function renderChatView() {
 
   return `
     <div class="chat-screen">
+      <div class="mobile-chat-context">
+        <strong>${escapeHtml(activeChat?.title || "Nova conversa")}</strong>
+        <span>${escapeHtml(activeChat ? messageCountLabel : "Sem mensagens ainda")}</span>
+      </div>
+
       <div id="message-feed" class="message-feed">
         ${
           state.loadingMessages
@@ -505,7 +519,7 @@ function renderChatView() {
             </div>
           </div>
 
-          <div class="helper-text">
+          <div class="helper-text composer-guidance">
             ${escapeHtml(MODE_META[state.composerMode].hint)}
             ${
               state.composerMode === "auto"
@@ -552,7 +566,7 @@ function renderChatView() {
             </button>
           </div>
 
-          <div class="helper-text">
+          <div class="helper-text composer-footnote">
             Suporta ate 4 anexos por mensagem. Para gerar HTML/CSS a partir de uma imagem, usa o modo <strong>Codigo</strong> ou deixa em <strong>Auto</strong>. ${escapeHtml(imageModeNote)}
           </div>
         </form>
@@ -682,6 +696,8 @@ function renderSettingsView() {
     imageQuality: "hd",
     maskedApiKey: "Nao definida",
     hasApiKey: false,
+    storagePath: "",
+    usesExternalStorage: false,
     ...(state.settings || {}),
   };
   const imageModelProfile = getImageModelProfile(settings.imageOutputModel);
@@ -695,6 +711,10 @@ function renderSettingsView() {
         <p class="section-copy">
           Sugestao atual baseada nas docs oficiais: <strong>gpt-5.5</strong> para assistente e codigo, e <strong>dall-e-3</strong> como fallback compativel para geracao de imagem sem depender do bloqueio dos modelos GPT Image. Assim que a organizacao OpenAI estiver verificada, o mais robusto e voltar para um modelo GPT Image.
         </p>
+        <div class="storage-banner ${settings.usesExternalStorage ? "is-external" : ""}">
+          <strong>${settings.usesExternalStorage ? "Persistencia preparada" : "Persistencia local"}</strong>
+          <span>${escapeHtml(settings.storagePath || "Diretorio nao identificado.")}</span>
+        </div>
 
         <form id="settings-form" class="stack">
           <div class="form-grid">
@@ -1006,6 +1026,17 @@ function bindEvents() {
   document.querySelectorAll("[data-reset-password]").forEach((button) => {
     button.addEventListener("click", () => handleResetPassword(button.dataset.resetPassword));
   });
+}
+
+function bindGlobalEvents() {
+  window.addEventListener("resize", handleViewportResize, { passive: true });
+}
+
+function handleViewportResize() {
+  if (!isMobileViewport() && state.mobileSidebarOpen) {
+    state.mobileSidebarOpen = false;
+    render();
+  }
 }
 
 function updateModeSummaryMeta() {

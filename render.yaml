@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: private-chatgpt-pro
+    runtime: node
+    plan: starter
+    buildCommand: echo "No build step"
+    startCommand: node server.mjs
+    envVars:
+      - key: NODE_VERSION
+        value: 24.14.1
+      - key: APP_DATA_DIR
+        value: /var/data/private-chatgpt-pro
+      - key: BOOTSTRAP_OPENAI_KEY
+        sync: false
+    disk:
+      name: private-chatgpt-data
+      mountPath: /var/data
+      sizeGB: 1

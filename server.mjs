@@ -8,7 +8,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PUBLIC_DIR = path.join(__dirname, "public");
-const DATA_DIR = path.join(__dirname, "data");
+const LOCAL_DATA_DIR = path.join(__dirname, "data");
+const DATA_DIR = resolveDataDir(process.env.APP_DATA_DIR?.trim() || "", LOCAL_DATA_DIR);
 const UPLOADS_DIR = path.join(DATA_DIR, "uploads");
 const STATE_FILE = path.join(DATA_DIR, "app-data.json");
 const SECRET_FILE = path.join(DATA_DIR, "server-secret.json");
@@ -85,10 +86,12 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Private ChatGPT Pro a correr em http://localhost:${PORT}`);
+  console.log(`Dados da aplicacao em: ${DATA_DIR}`);
 });
 
 async function bootstrap() {
   await fs.mkdir(PUBLIC_DIR, { recursive: true });
+  await seedDataDirectoryFromLegacyLocation();
   await fs.mkdir(DATA_DIR, { recursive: true });
   await fs.mkdir(UPLOADS_DIR, { recursive: true });
 
@@ -99,6 +102,49 @@ async function bootstrap() {
   await ensureDefaultAdmin();
   if (changed) {
     await persistState();
+  }
+}
+
+function resolveDataDir(configuredPath, fallbackPath) {
+  if (!configuredPath) {
+    return fallbackPath;
+  }
+
+  return path.isAbsolute(configuredPath)
+    ? path.normalize(configuredPath)
+    : path.resolve(__dirname, configuredPath);
+}
+
+async function seedDataDirectoryFromLegacyLocation() {
+  if (path.resolve(DATA_DIR) === path.resolve(LOCAL_DATA_DIR)) {
+    return;
+  }
+
+  const targetStateExists = await pathExists(STATE_FILE);
+  if (targetStateExists) {
+    return;
+  }
+
+  const legacyStateFile = path.join(LOCAL_DATA_DIR, "app-data.json");
+  const legacyStateExists = await pathExists(legacyStateFile);
+  if (!legacyStateExists) {
+    return;
+  }
+
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.cp(LOCAL_DATA_DIR, DATA_DIR, {
+    recursive: true,
+    force: false,
+    errorOnExist: false,
+  });
+}
+
+async function pathExists(targetPath) {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -948,6 +994,8 @@ function serializeSettings() {
     imageQuality: appState.settings.imageQuality,
     hasApiKey: Boolean(decryptedKey),
     maskedApiKey: maskSecret(decryptedKey),
+    storagePath: DATA_DIR,
+    usesExternalStorage: path.resolve(DATA_DIR) !== path.resolve(LOCAL_DATA_DIR),
     updatedAt: appState.settings.updatedAt,
   };
 }
