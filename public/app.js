@@ -2,11 +2,15 @@ const APP_NAME = "Private ChatGPT Pro";
 const APP_SIGNATURE = "by Carlos Ramos";
 const MOBILE_SIDEBAR_BREAKPOINT = 1040;
 let globalEventsBound = false;
+let activeVoiceRecorder = null;
+let activeVoiceStream = null;
+let voiceRecordingTimer = null;
+let activeRealtimeVoiceSession = null;
 
 const MODE_META = {
   auto: {
     label: "Auto",
-    hint: "Escolhe automaticamente entre assistente, codigo e imagem.",
+    hint: "Escolhe automaticamente entre assistente, codigo, imagem e conversa por voz.",
   },
   assistant: {
     label: "Assistente",
@@ -19,6 +23,10 @@ const MODE_META = {
   image: {
     label: "Imagem",
     hint: "Geracao e edicao de imagens com foco em realismo.",
+  },
+  ptpt: {
+    label: "Conversa por voz",
+    hint: "Conversa falada em tempo real, com microfone aberto e resposta por voz em portugues de Portugal.",
   },
 };
 
@@ -44,6 +52,13 @@ const PRESETS = {
       label: "HTML/CSS da imagem",
       prompt:
         "Recria a interface mostrada na imagem em HTML e CSS puros, responsivos, semanticamente corretos e prontos a abrir no browser. Entrega o codigo completo.",
+    },
+    {
+      id: "auto-ptpt-voice",
+      mode: "ptpt",
+      label: "Conversa por voz",
+      prompt:
+        "Quero falar contigo por voz em portugues de Portugal e ouvir a tua resposta.",
     },
   ],
   assistant: [
@@ -108,6 +123,29 @@ const PRESETS = {
         "Cria um mockup fotorealista e elegante deste conceito/produto com enquadramento profissional.",
     },
   ],
+  ptpt: [
+    {
+      id: "ptpt-convert",
+      mode: "ptpt",
+      label: "Ao vivo",
+      prompt:
+        "Vamos ter esta conversa por voz em portugues de Portugal.",
+    },
+    {
+      id: "ptpt-voice",
+      mode: "ptpt",
+      label: "Resposta falada",
+      prompt:
+        "Responde com voz em portugues de Portugal, de forma clara e natural.",
+    },
+    {
+      id: "ptpt-formal",
+      mode: "ptpt",
+      label: "Tom profissional",
+      prompt:
+        "Fala comigo em portugues de Portugal com um tom profissional, claro e natural.",
+    },
+  ],
 };
 
 const state = {
@@ -121,10 +159,16 @@ const state = {
   loadingChats: false,
   loadingMessages: false,
   pendingMessage: false,
+  voiceRecording: false,
+  voiceRecordingSeconds: 0,
   composerText: "",
   composerAttachments: [],
   composerMode: "auto",
   mobileSidebarOpen: false,
+  pendingAutoplayAudioId: null,
+  liveVoiceStatus: "idle",
+  liveVoiceError: "",
+  liveVoiceLog: [],
   settings: null,
   users: [],
   loadingAdmin: false,
@@ -223,6 +267,7 @@ async function loadChats() {
 }
 
 async function loadMessages(chatId) {
+  stopRealtimeVoiceConversation(true);
   if (!chatId) {
     state.messages = [];
     state.activeChatId = null;
@@ -455,6 +500,8 @@ function renderChatView() {
   const effectiveAutoMode = detectAutoMode(state.composerText, state.composerAttachments);
   const visibleMode = state.composerMode === "auto" ? effectiveAutoMode : state.composerMode;
   const imageModeNote = getImageModeNote(publicSettings.imageOutputModel);
+  const voiceModeNote = getVoiceModeNote();
+  const liveVoiceStatus = getLiveVoiceStatusMeta();
   const activeChat = state.chats.find((chat) => chat.id === state.activeChatId) || null;
   const messageCountLabel =
     state.messages.length === 1 ? "1 mensagem" : `${state.messages.length} mensagens`;
@@ -466,12 +513,13 @@ function renderChatView() {
           <span class="hero-tag">Experiencia multimodal</span>
           <h2 class="section-title">Pronto para criar</h2>
           <p class="section-copy">
-            Usa o modo Auto para a app escolher entre assistente, codigo ou imagem, ou seleciona manualmente quando quiseres controlar o resultado.
+            Usa o modo Auto para a app escolher entre assistente, codigo, imagem ou voz, ou seleciona manualmente quando quiseres controlar o resultado.
           </p>
           <div class="suggestions">
             ${renderPresetButton(PRESETS.auto[0])}
             ${renderPresetButton(PRESETS.auto[1])}
             ${renderPresetButton(PRESETS.auto[2])}
+            ${renderPresetButton(PRESETS.auto[3])}
           </div>
         </div>
       </div>
@@ -495,7 +543,7 @@ function renderChatView() {
                 <div class="empty-card">
                   <span class="hero-tag">Conversa vazia</span>
                   <h3 class="section-title" style="font-size:24px;margin-top:14px;">Escolhe um modo e envia o primeiro pedido.</h3>
-                  <p class="section-copy">Podes pedir codigo, gerar uma imagem realista ou transformar uma screenshot em HTML/CSS.</p>
+                  <p class="section-copy">Podes falar por voz, pedir codigo, gerar uma imagem realista ou transformar uma screenshot em HTML/CSS.</p>
                 </div>
               `
         }
@@ -509,6 +557,7 @@ function renderChatView() {
               ${renderModeButton("assistant")}
               ${renderModeButton("code")}
               ${renderModeButton("image")}
+              ${renderModeButton("ptpt")}
             </div>
             <div class="chat-meta">
               ${
@@ -532,6 +581,8 @@ function renderChatView() {
             ${getPresetsForComposer().map(renderPresetButton).join("")}
           </div>
 
+          ${visibleMode === "ptpt" ? renderLiveVoicePanel(publicSettings, liveVoiceStatus) : ""}
+
           <textarea
             id="composer-textarea"
             placeholder="${escapeAttribute(getComposerPlaceholder(visibleMode, state.composerMode === "auto"))}"
@@ -549,6 +600,19 @@ function renderChatView() {
 
           <div class="composer-actions">
             <div class="sidebar-actions">
+              ${
+                visibleMode === "ptpt"
+                  ? `
+                    <button
+                      type="button"
+                      class="button ${state.voiceRecording ? "button-danger" : "button-secondary"}"
+                      id="voice-record-button"
+                    >
+                      ${state.voiceRecording ? `Parar gravacao (${formatVoiceDuration(state.voiceRecordingSeconds)})` : "Gravar nota de voz"}
+                    </button>
+                  `
+                  : ""
+              }
               <label class="button button-secondary" for="attachment-input">Adicionar anexos</label>
               <input id="attachment-input" class="hidden-input" type="file" multiple />
               ${
@@ -567,7 +631,11 @@ function renderChatView() {
           </div>
 
           <div class="helper-text composer-footnote">
-            Suporta ate 4 anexos por mensagem. Para gerar HTML/CSS a partir de uma imagem, usa o modo <strong>Codigo</strong> ou deixa em <strong>Auto</strong>. ${escapeHtml(imageModeNote)}
+            ${
+              visibleMode === "ptpt"
+                ? `Modo de conversa falada. ${escapeHtml(voiceModeNote)}`
+                : `Suporta ate 4 anexos por mensagem. Para gerar HTML/CSS a partir de uma imagem, usa o modo <strong>Codigo</strong> ou deixa em <strong>Auto</strong>. ${escapeHtml(imageModeNote)}`
+            }
           </div>
         </form>
       </div>
@@ -597,6 +665,73 @@ function renderPresetButton(preset) {
     >
       ${escapeHtml(preset.label)}
     </button>
+  `;
+}
+
+function renderLiveVoicePanel(publicSettings, liveVoiceStatus) {
+  const supported = isRealtimeVoiceSupported();
+  const isActive = isLiveVoiceSessionActive();
+  const voiceModel = publicSettings.voiceRealtimeModel || "gpt-realtime-mini";
+  const voiceName = publicSettings.voiceOutputVoice || "coral";
+  const transcriptEntries = state.liveVoiceLog.length
+    ? state.liveVoiceLog.map(renderLiveVoiceEntry).join("")
+    : `
+        <div class="voice-live-empty">
+          ${
+            supported
+              ? "Ativa a conversa ao vivo e fala naturalmente. O assistente responde por voz sem precisares de escrever."
+              : "Este browser nao suporta a conversa ao vivo. Podes continuar a usar a nota de voz logo abaixo."
+          }
+        </div>
+      `;
+
+  return `
+    <section class="voice-live-panel ${isActive ? "is-live" : ""}">
+      <div class="voice-live-head">
+        <div class="voice-live-copy">
+          <span class="hero-tag">Conversa ao vivo</span>
+          <h3 class="voice-live-title">Fala como no ChatGPT</h3>
+          <p class="helper-text">
+            Microfone aberto, resposta falada em tempo real e sem depender do campo de texto.
+          </p>
+        </div>
+        <div class="voice-live-actions">
+          <span class="status-badge ${liveVoiceStatus.tone}">${escapeHtml(liveVoiceStatus.label)}</span>
+          <button
+            type="button"
+            class="button ${isActive ? "button-danger" : "button-primary"}"
+            id="voice-live-toggle-button"
+            ${supported ? "" : "disabled"}
+          >
+            ${isActive ? "Terminar conversa" : "Iniciar conversa ao vivo"}
+          </button>
+        </div>
+      </div>
+
+      <div class="voice-live-meta-row">
+        <span class="mini-badge">Modelo: ${escapeHtml(voiceModel)}</span>
+        <span class="mini-badge">Voz: ${escapeHtml(voiceName)}</span>
+      </div>
+
+      ${
+        state.liveVoiceError
+          ? `<div class="voice-live-error">${escapeHtml(state.liveVoiceError)}</div>`
+          : ""
+      }
+
+      <div class="voice-live-log">
+        ${transcriptEntries}
+      </div>
+    </section>
+  `;
+}
+
+function renderLiveVoiceEntry(entry) {
+  return `
+    <div class="voice-live-entry ${entry.role} ${entry.draft ? "is-draft" : ""}">
+      <span class="voice-live-entry-role">${entry.role === "user" ? "Tu" : "Assistente"}</span>
+      <div>${escapeHtml(entry.text || entry.draftText || "")}</div>
+    </div>
   `;
 }
 
@@ -632,9 +767,24 @@ function renderMessage(message) {
 
 function renderSavedAttachment(attachment) {
   const isImage = attachment.kind === "image" || attachment.kind === "generated-image";
+  const isAudio = String(attachment.mimeType || "").startsWith("audio/");
   const className = attachment.kind === "generated-image"
     ? "attachment-card generated-image-card"
-    : "attachment-card";
+    : attachment.kind === "generated-audio" || isAudio
+      ? "attachment-card audio-card"
+      : "attachment-card";
+
+  if (isAudio) {
+    return `
+      <div class="${className}">
+        <div class="attachment-details">
+          <div class="attachment-name">${escapeHtml(attachment.name)}</div>
+          <div class="attachment-meta">${formatBytes(attachment.size)}</div>
+        </div>
+        <audio controls preload="none" src="${attachment.url}" data-audio-attachment="${attachment.id}"></audio>
+      </div>
+    `;
+  }
 
   const preview = isImage
     ? `<img src="${attachment.url}" alt="${escapeHtml(attachment.name)}" />`
@@ -687,8 +837,11 @@ function renderSettingsView() {
     defaultModel: "gpt-5.5",
     codeModel: "gpt-5.5",
     imageOutputModel: "dall-e-3",
+    voiceRealtimeModel: "gpt-realtime-mini",
+    voiceOutputVoice: "coral",
     systemPrompt: "",
     codeSystemPrompt: "",
+    conversionSystemPrompt: "",
     imageSystemPrompt: "",
     reasoningEffort: "medium",
     maxOutputTokens: 4000,
@@ -709,7 +862,7 @@ function renderSettingsView() {
         <span class="hero-tag">Conta OpenAI e modos</span>
         <h2 class="section-title">Parametros da experiencia</h2>
         <p class="section-copy">
-          Sugestao atual baseada nas docs oficiais: <strong>gpt-5.5</strong> para assistente e codigo, e <strong>dall-e-3</strong> como fallback compativel para geracao de imagem sem depender do bloqueio dos modelos GPT Image. Assim que a organizacao OpenAI estiver verificada, o mais robusto e voltar para um modelo GPT Image.
+          Sugestao atual baseada nas docs oficiais: <strong>gpt-5.5</strong> para assistente e codigo, <strong>gpt-realtime-mini</strong> para conversa por voz ao vivo, e <strong>dall-e-3</strong> como fallback compativel para geracao de imagem sem depender do bloqueio dos modelos GPT Image. Assim que a organizacao OpenAI estiver verificada, o mais robusto e voltar para um modelo GPT Image.
         </p>
         <div class="storage-banner ${settings.usesExternalStorage ? "is-external" : ""}">
           <strong>${settings.usesExternalStorage ? "Persistencia preparada" : "Persistencia local"}</strong>
@@ -741,6 +894,24 @@ function renderSettingsView() {
                 <option value="gpt-image-1-mini"></option>
               </datalist>
               <div class="helper-text">${escapeHtml(imageModelHelper)}</div>
+            </div>
+            <div class="field">
+              <label for="voice-realtime-model">Modelo de voz ao vivo</label>
+              <input id="voice-realtime-model" class="input" name="voiceRealtimeModel" list="voice-model-options" value="${escapeAttribute(settings.voiceRealtimeModel)}" />
+              <datalist id="voice-model-options">
+                <option value="gpt-realtime-mini"></option>
+                <option value="gpt-realtime"></option>
+                <option value="gpt-realtime-1.5"></option>
+                <option value="gpt-audio-mini"></option>
+              </datalist>
+            </div>
+            <div class="field">
+              <label for="voice-output-voice">Voz do assistente</label>
+              <select id="voice-output-voice" class="select" name="voiceOutputVoice">
+                ${["coral", "marin", "cedar", "sage", "ash", "verse", "alloy", "ballad", "echo", "shimmer"].map((value) => `
+                  <option value="${value}" ${settings.voiceOutputVoice === value ? "selected" : ""}>${value}</option>
+                `).join("")}
+              </select>
             </div>
             <div class="field">
               <label for="reasoning-effort">Esforco de raciocinio</label>
@@ -777,6 +948,10 @@ function renderSettingsView() {
             <div class="field wide">
               <label for="code-system-prompt">Prompt do modo codigo</label>
               <textarea id="code-system-prompt" class="textarea" name="codeSystemPrompt">${escapeHtml(settings.codeSystemPrompt || "")}</textarea>
+            </div>
+            <div class="field wide">
+              <label for="conversion-system-prompt">Prompt da conversa por voz</label>
+              <textarea id="conversion-system-prompt" class="textarea" name="conversionSystemPrompt">${escapeHtml(settings.conversionSystemPrompt || "")}</textarea>
             </div>
             <div class="field wide">
               <label for="image-system-prompt">Prompt do modo imagem</label>
@@ -925,6 +1100,7 @@ function bindEvents() {
   const openSettingsButton = document.querySelector("#open-settings-button");
   if (openSettingsButton) {
     openSettingsButton.addEventListener("click", async () => {
+      stopRealtimeVoiceConversation(true);
       state.view = "settings";
       closeMobileSidebar();
       render();
@@ -935,6 +1111,7 @@ function bindEvents() {
   const settingsTabButton = document.querySelector("#settings-tab-button");
   if (settingsTabButton) {
     settingsTabButton.addEventListener("click", async () => {
+      stopRealtimeVoiceConversation(true);
       state.view = "settings";
       closeMobileSidebar();
       render();
@@ -944,6 +1121,7 @@ function bindEvents() {
 
   document.querySelectorAll("[data-chat-id]").forEach((button) => {
     button.addEventListener("click", async () => {
+      stopRealtimeVoiceConversation(true);
       await loadMessages(button.dataset.chatId);
       closeMobileSidebar();
     });
@@ -951,6 +1129,9 @@ function bindEvents() {
 
   document.querySelectorAll("[data-mode-button]").forEach((button) => {
     button.addEventListener("click", () => {
+      if (button.dataset.modeButton !== "ptpt") {
+        stopRealtimeVoiceConversation(true);
+      }
       state.composerMode = button.dataset.modeButton;
       render();
     });
@@ -992,6 +1173,16 @@ function bindEvents() {
     attachmentInput.addEventListener("change", handleAttachmentSelection);
   }
 
+  const voiceRecordButton = document.querySelector("#voice-record-button");
+  if (voiceRecordButton) {
+    voiceRecordButton.addEventListener("click", handleVoiceRecordToggle);
+  }
+
+  const liveVoiceToggleButton = document.querySelector("#voice-live-toggle-button");
+  if (liveVoiceToggleButton) {
+    liveVoiceToggleButton.addEventListener("click", handleLiveVoiceToggle);
+  }
+
   document.querySelectorAll("[data-remove-attachment]").forEach((button) => {
     button.addEventListener("click", () => {
       const index = Number(button.dataset.removeAttachment);
@@ -1030,6 +1221,10 @@ function bindEvents() {
 
 function bindGlobalEvents() {
   window.addEventListener("resize", handleViewportResize, { passive: true });
+  window.addEventListener("pagehide", () => {
+    stopVoiceCapture(true);
+    stopRealtimeVoiceConversation(true);
+  });
 }
 
 function handleViewportResize() {
@@ -1105,6 +1300,9 @@ async function handleLoginSubmit(event) {
 }
 
 async function handleLogout() {
+  stopVoiceCapture(true);
+  stopRealtimeVoiceConversation(true);
+
   try {
     await api("/api/auth/logout", { method: "POST" });
   } catch {
@@ -1117,10 +1315,16 @@ async function handleLogout() {
     activeChatId: null,
     messages: [],
     view: "chat",
+    voiceRecording: false,
+    voiceRecordingSeconds: 0,
     composerText: "",
     composerAttachments: [],
     composerMode: "auto",
     mobileSidebarOpen: false,
+    pendingAutoplayAudioId: null,
+    liveVoiceStatus: "idle",
+    liveVoiceError: "",
+    liveVoiceLog: [],
     settings: null,
     users: [],
     loginError: "",
@@ -1129,6 +1333,7 @@ async function handleLogout() {
 }
 
 async function handleNewChat() {
+  stopRealtimeVoiceConversation(true);
   try {
     const response = await api("/api/chats", {
       method: "POST",
@@ -1150,6 +1355,10 @@ async function handleSendMessage(event) {
   event.preventDefault();
   if (state.pendingMessage) {
     return;
+  }
+
+  if (isLiveVoiceSessionActive()) {
+    stopRealtimeVoiceConversation(true);
   }
 
   let chatId = state.activeChatId;
@@ -1228,6 +1437,9 @@ async function handleSendMessage(event) {
     state.messages.push(response.userMessage, response.assistantMessage);
     upsertChat(response.chat);
     state.activeChatId = response.chat.id;
+    state.pendingAutoplayAudioId = response.assistantMessage.attachments?.find(
+      (attachment) => attachment.kind === "generated-audio",
+    )?.id || null;
     if (response.warning) {
       pushToast("Resposta devolvida com aviso", response.warning, "error");
     }
@@ -1240,6 +1452,7 @@ async function handleSendMessage(event) {
     state.pendingMessage = false;
     render();
     scrollMessagesToBottom();
+    autoplayPendingGeneratedAudio();
   }
 }
 
@@ -1265,6 +1478,449 @@ async function handleAttachmentSelection(event) {
   }
 }
 
+async function handleVoiceRecordToggle() {
+  if (state.pendingMessage) {
+    return;
+  }
+
+  if (isLiveVoiceSessionActive()) {
+    stopRealtimeVoiceConversation(true);
+  }
+
+  if (state.voiceRecording) {
+    stopVoiceCapture();
+    return;
+  }
+
+  if (!isVoiceCaptureSupported()) {
+    pushToast("Voz indisponivel", "Este browser nao suporta gravacao de audio nesta app.", "error");
+    return;
+  }
+
+  try {
+    await startVoiceCapture();
+  } catch (error) {
+    pushToast("Nao foi possivel iniciar a gravacao.", error.message, "error");
+    stopVoiceCapture(true);
+  }
+}
+
+async function startVoiceCapture() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const mimeType = getSupportedRecorderMimeType();
+  const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+  const chunks = [];
+
+  recorder.addEventListener("dataavailable", (event) => {
+    if (event.data?.size) {
+      chunks.push(event.data);
+    }
+  });
+
+  recorder.addEventListener("stop", async () => {
+    const blob = new Blob(chunks, {
+      type: recorder.mimeType || mimeType || "audio/webm",
+    });
+    const extension = guessRecorderExtension(blob.type);
+
+    stopVoiceCapture(true);
+
+    if (!blob.size) {
+      pushToast("Gravacao vazia", "Nao foi captado audio nesta tentativa.", "error");
+      return;
+    }
+
+    try {
+      const recordedAttachment = await blobToDataAttachment(blob, `voice-note-${Date.now()}.${extension}`);
+      if (state.composerAttachments.length >= 4) {
+        pushToast("Limite de anexos", "Remove um anexo antes de enviar uma nova nota de voz.", "error");
+        return;
+      }
+
+      state.composerMode = "ptpt";
+      state.composerAttachments = [...state.composerAttachments, recordedAttachment];
+      render();
+      await handleSendMessage(new Event("submit"));
+    } catch (error) {
+      pushToast("Falha ao preparar a nota de voz", error.message, "error");
+    }
+  });
+
+  activeVoiceStream = stream;
+  activeVoiceRecorder = recorder;
+  state.voiceRecording = true;
+  state.voiceRecordingSeconds = 0;
+  render();
+
+  voiceRecordingTimer = window.setInterval(() => {
+    state.voiceRecordingSeconds += 1;
+    render();
+  }, 1000);
+
+  recorder.start();
+}
+
+function stopVoiceCapture(silent = false) {
+  if (voiceRecordingTimer) {
+    clearInterval(voiceRecordingTimer);
+    voiceRecordingTimer = null;
+  }
+
+  if (activeVoiceRecorder) {
+    const recorder = activeVoiceRecorder;
+    activeVoiceRecorder = null;
+    if (recorder.state !== "inactive") {
+      recorder.stop();
+    }
+  }
+
+  if (activeVoiceStream) {
+    for (const track of activeVoiceStream.getTracks()) {
+      track.stop();
+    }
+    activeVoiceStream = null;
+  }
+
+  if (state.voiceRecording || !silent) {
+    state.voiceRecording = false;
+    state.voiceRecordingSeconds = 0;
+    render();
+  }
+}
+
+async function handleLiveVoiceToggle() {
+  if (isLiveVoiceSessionActive()) {
+    stopRealtimeVoiceConversation();
+    return;
+  }
+
+  await startRealtimeVoiceConversation();
+}
+
+async function startRealtimeVoiceConversation() {
+  if (state.pendingMessage) {
+    return;
+  }
+
+  if (!isRealtimeVoiceSupported()) {
+    pushToast(
+      "Conversa ao vivo indisponivel",
+      "Este browser nao suporta sessoes de voz em tempo real.",
+      "error",
+    );
+    return;
+  }
+
+  if (activeRealtimeVoiceSession) {
+    return;
+  }
+
+  state.liveVoiceStatus = "connecting";
+  state.liveVoiceError = "";
+  state.liveVoiceLog = [];
+  render();
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+
+    const peerConnection = new RTCPeerConnection();
+    const remoteAudio = document.createElement("audio");
+    remoteAudio.autoplay = true;
+    remoteAudio.playsInline = true;
+    remoteAudio.style.display = "none";
+    document.body.appendChild(remoteAudio);
+
+    const dataChannel = peerConnection.createDataChannel("oai-events");
+    const session = {
+      closed: false,
+      dataChannel,
+      peerConnection,
+      remoteAudio,
+      stream,
+    };
+    activeRealtimeVoiceSession = session;
+
+    peerConnection.ontrack = (event) => {
+      const [remoteStream] = event.streams || [];
+      if (remoteStream) {
+        remoteAudio.srcObject = remoteStream;
+        const playPromise = remoteAudio.play?.();
+        if (playPromise && typeof playPromise.catch === "function") {
+          playPromise.catch(() => {});
+        }
+      }
+    };
+
+    peerConnection.onconnectionstatechange = () => {
+      if (activeRealtimeVoiceSession !== session || session.closed) {
+        return;
+      }
+
+      const stateName = peerConnection.connectionState;
+      if (stateName === "connected") {
+        state.liveVoiceStatus = "ready";
+        state.liveVoiceError = "";
+        render();
+        return;
+      }
+
+      if (stateName === "connecting") {
+        state.liveVoiceStatus = "connecting";
+        render();
+        return;
+      }
+
+      if (["failed", "disconnected", "closed"].includes(stateName)) {
+        stopRealtimeVoiceConversation(true);
+        if (stateName !== "closed") {
+          state.liveVoiceStatus = "error";
+          state.liveVoiceError = "A conversa ao vivo foi interrompida.";
+          render();
+        }
+      }
+    };
+
+    stream.getTracks().forEach((track) => {
+      peerConnection.addTrack(track, stream);
+    });
+
+    dataChannel.addEventListener("open", () => {
+      if (activeRealtimeVoiceSession !== session || session.closed) {
+        return;
+      }
+
+      state.liveVoiceStatus = "ready";
+      state.liveVoiceError = "";
+      render();
+    });
+
+    dataChannel.addEventListener("message", (event) => {
+      handleRealtimeVoiceServerEvent(event, session);
+    });
+
+    dataChannel.addEventListener("close", () => {
+      if (activeRealtimeVoiceSession !== session || session.closed) {
+        return;
+      }
+
+      stopRealtimeVoiceConversation(true);
+      state.liveVoiceStatus = "idle";
+      render();
+    });
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    const response = await fetch("/api/realtime/session", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/sdp",
+      },
+      credentials: "same-origin",
+      body: offer.sdp,
+    });
+
+    if (!response.ok) {
+      const contentType = response.headers.get("content-type") || "";
+      const errorMessage = contentType.includes("application/json")
+        ? (await response.json().catch(() => ({}))).error
+        : await response.text().catch(() => "");
+      throw new Error(errorMessage || "Nao foi possivel abrir a sessao de voz ao vivo.");
+    }
+
+    const answerSdp = await response.text();
+    await peerConnection.setRemoteDescription({
+      type: "answer",
+      sdp: answerSdp,
+    });
+  } catch (error) {
+    stopRealtimeVoiceConversation(true);
+    state.liveVoiceStatus = "error";
+    state.liveVoiceError = error.message || "Falha ao iniciar a conversa ao vivo.";
+    render();
+    pushToast("Conversa por voz indisponivel", state.liveVoiceError, "error");
+  }
+}
+
+function stopRealtimeVoiceConversation(silent = false) {
+  const session = activeRealtimeVoiceSession;
+  activeRealtimeVoiceSession = null;
+
+  if (session) {
+    session.closed = true;
+
+    try {
+      session.dataChannel?.close();
+    } catch {
+      // noop
+    }
+
+    try {
+      session.peerConnection?.close();
+    } catch {
+      // noop
+    }
+
+    if (session.stream) {
+      for (const track of session.stream.getTracks()) {
+        track.stop();
+      }
+    }
+
+    if (session.remoteAudio) {
+      session.remoteAudio.pause?.();
+      session.remoteAudio.srcObject = null;
+      session.remoteAudio.remove();
+    }
+  }
+
+  if (!silent || state.liveVoiceStatus !== "idle" || state.liveVoiceError) {
+    state.liveVoiceStatus = "idle";
+    state.liveVoiceError = "";
+    render();
+  }
+}
+
+function handleRealtimeVoiceServerEvent(messageEvent, session) {
+  if (activeRealtimeVoiceSession !== session || session.closed) {
+    return;
+  }
+
+  let event;
+  try {
+    event = JSON.parse(messageEvent.data);
+  } catch {
+    return;
+  }
+
+  switch (event.type) {
+    case "session.created":
+    case "session.updated":
+      if (state.liveVoiceStatus === "connecting") {
+        state.liveVoiceStatus = "ready";
+      }
+      break;
+    case "input_audio_buffer.speech_started":
+      state.liveVoiceStatus = "listening";
+      break;
+    case "input_audio_buffer.speech_stopped":
+      state.liveVoiceStatus = "thinking";
+      break;
+    case "conversation.item.input_audio_transcription.delta":
+      upsertLiveVoiceEntry("user", event.item_id || event.event_id, event.delta, true);
+      break;
+    case "conversation.item.input_audio_transcription.completed":
+      upsertLiveVoiceEntry("user", event.item_id || event.event_id, event.transcript, false);
+      state.liveVoiceStatus = "thinking";
+      break;
+    case "response.output_audio.delta":
+      state.liveVoiceStatus = "speaking";
+      break;
+    case "response.output_audio_transcript.delta":
+      upsertLiveVoiceEntry(
+        "assistant",
+        event.item_id || event.response_id || event.event_id,
+        event.delta,
+        true,
+      );
+      state.liveVoiceStatus = "speaking";
+      break;
+    case "response.output_audio_transcript.done":
+      upsertLiveVoiceEntry(
+        "assistant",
+        event.item_id || event.response_id || event.event_id,
+        event.transcript,
+        false,
+      );
+      state.liveVoiceStatus = "ready";
+      break;
+    case "response.done":
+      if (event.response?.status && event.response.status !== "completed") {
+        state.liveVoiceError =
+          event.response.status === "cancelled"
+            ? ""
+            : "A resposta de voz terminou com um estado inesperado.";
+      } else if (state.liveVoiceStatus !== "listening") {
+        state.liveVoiceStatus = "ready";
+      }
+      break;
+    case "error": {
+      const nextError =
+        event.error?.message || event.message || "Erro inesperado na sessao de voz ao vivo.";
+      state.liveVoiceStatus = "error";
+      state.liveVoiceError = nextError;
+      pushToast("Erro na conversa ao vivo", nextError, "error");
+      break;
+    }
+    default:
+      break;
+  }
+
+  render();
+}
+
+function upsertLiveVoiceEntry(role, key, value, draft) {
+  const text = String(value || "");
+  if (!text) {
+    return;
+  }
+
+  const entryKey = `${role}:${key}`;
+  const nextEntries = [...state.liveVoiceLog];
+  const existing = nextEntries.find((entry) => entry.entryKey === entryKey);
+
+  if (existing) {
+    existing.text = draft ? `${existing.text || ""}${text}` : text;
+    existing.draft = draft;
+  } else {
+    nextEntries.push({
+      draft,
+      entryKey,
+      role,
+      text,
+    });
+  }
+
+  state.liveVoiceLog = nextEntries.slice(-12);
+}
+
+function isLiveVoiceSessionActive() {
+  return Boolean(activeRealtimeVoiceSession && !activeRealtimeVoiceSession.closed);
+}
+
+function isRealtimeVoiceSupported() {
+  return Boolean(
+    typeof window !== "undefined" &&
+    typeof RTCPeerConnection !== "undefined" &&
+    navigator?.mediaDevices?.getUserMedia,
+  );
+}
+
+function getLiveVoiceStatusMeta() {
+  switch (state.liveVoiceStatus) {
+    case "connecting":
+      return { label: "A ligar", tone: "warning" };
+    case "listening":
+      return { label: "A ouvir", tone: "active" };
+    case "thinking":
+      return { label: "A pensar", tone: "warning" };
+    case "speaking":
+      return { label: "A responder", tone: "active" };
+    case "ready":
+      return { label: "Ligado", tone: "active" };
+    case "error":
+      return { label: "Com erro", tone: "inactive" };
+    default:
+      return { label: "Desligado", tone: "inactive" };
+  }
+}
+
 async function handleDeleteChat() {
   if (!state.activeChatId) {
     return;
@@ -1274,6 +1930,8 @@ async function handleDeleteChat() {
   if (!confirmed) {
     return;
   }
+
+  stopRealtimeVoiceConversation(true);
 
   try {
     await api(`/api/chats/${state.activeChatId}`, { method: "DELETE" });
@@ -1305,8 +1963,11 @@ async function handleSaveSettings(event) {
         defaultModel: form.get("defaultModel"),
         codeModel: form.get("codeModel"),
         imageOutputModel: form.get("imageOutputModel"),
+        voiceRealtimeModel: form.get("voiceRealtimeModel"),
+        voiceOutputVoice: form.get("voiceOutputVoice"),
         systemPrompt: form.get("systemPrompt"),
         codeSystemPrompt: form.get("codeSystemPrompt"),
+        conversionSystemPrompt: form.get("conversionSystemPrompt"),
         imageSystemPrompt: form.get("imageSystemPrompt"),
         openAiApiKey: form.get("openAiApiKey"),
         reasoningEffort: form.get("reasoningEffort"),
@@ -1441,16 +2102,25 @@ function upsertChat(chat) {
   );
 }
 
-function applyPreset(presetId, presetMode) {
+async function applyPreset(presetId, presetMode) {
   const allPresets = [
     ...PRESETS.auto,
     ...PRESETS.assistant,
     ...PRESETS.code,
     ...PRESETS.image,
+    ...PRESETS.ptpt,
   ];
   const preset = allPresets.find((entry) => entry.id === presetId);
   if (!preset) {
     return;
+  }
+
+  if ((presetMode || preset.mode) !== "ptpt") {
+    stopRealtimeVoiceConversation(true);
+  }
+
+  if (!state.activeChatId && state.chats.length === 0) {
+    await handleNewChat();
   }
 
   state.composerMode = presetMode || preset.mode || state.composerMode;
@@ -1487,6 +2157,10 @@ function getComposerPlaceholder(visibleMode, isAuto) {
     return "Descreve a imagem que queres gerar ou anexa uma imagem para editar e melhorar...";
   }
 
+  if (visibleMode === "ptpt") {
+    return "Podes iniciar a conversa ao vivo ou, em alternativa, enviar uma nota de voz ou uma mensagem escrita...";
+  }
+
   return "Escreve a tua mensagem, analisa anexos, resume documentos ou pede apoio geral...";
 }
 
@@ -1496,6 +2170,9 @@ function getPendingLabel(mode) {
   }
   if (mode === "image") {
     return "A gerar imagem...";
+  }
+  if (mode === "ptpt") {
+    return "A responder em voz...";
   }
   return "A responder...";
 }
@@ -1507,6 +2184,9 @@ function getOptimisticAssistantText(mode) {
   if (mode === "image") {
     return "A gerar ou editar a imagem...";
   }
+  if (mode === "ptpt") {
+    return "A preparar a resposta falada...";
+  }
   return "A gerar resposta...";
 }
 
@@ -1516,6 +2196,8 @@ function getPublicSettings() {
     defaultModel: "gpt-5.5",
     codeModel: "gpt-5.5",
     imageOutputModel: "dall-e-3",
+    voiceRealtimeModel: "gpt-realtime-mini",
+    voiceOutputVoice: "coral",
     imageQuality: "hd",
     imageSize: "1024x1024",
     ...(state.settings || {}),
@@ -1603,6 +2285,9 @@ function resolveModelForMode(mode, settings = getPublicSettings()) {
   if (mode === "image") {
     return settings.imageOutputModel;
   }
+  if (mode === "ptpt") {
+    return settings.voiceRealtimeModel || settings.defaultModel;
+  }
   return settings.defaultModel;
 }
 
@@ -1610,6 +2295,9 @@ function detectAutoMode(text, attachments) {
   const lowered = String(text || "").toLowerCase();
   const hasImageAttachment = attachments.some((attachment) =>
     String(attachment.type || attachment.mimeType || "").toLowerCase().startsWith("image/"),
+  );
+  const hasAudioAttachment = attachments.some((attachment) =>
+    String(attachment.type || attachment.mimeType || "").toLowerCase().startsWith("audio/"),
   );
 
   const imageIntent = [
@@ -1643,12 +2331,26 @@ function detectAutoMode(text, attachments) {
     /\blanding page\b/,
   ];
 
+  const voiceIntent = [
+    /\bmodo de voz\b/,
+    /\bconversa por voz\b/,
+    /\bquero falar\b/,
+    /\bfala comigo\b/,
+    /\bresponde com voz\b/,
+    /\bmicrofone\b/,
+    /\bvoice chat\b/,
+  ];
+
   if (hasImageAttachment && codeIntent.some((pattern) => pattern.test(lowered))) {
     return "code";
   }
 
   if (imageIntent.some((pattern) => pattern.test(lowered))) {
     return "image";
+  }
+
+  if (hasAudioAttachment || voiceIntent.some((pattern) => pattern.test(lowered))) {
+    return "ptpt";
   }
 
   if (codeIntent.some((pattern) => pattern.test(lowered))) {
@@ -1721,6 +2423,88 @@ function fileToDataUrl(file) {
     reader.onerror = () => reject(new Error(`Falha ao ler o ficheiro ${file.name}.`));
     reader.readAsDataURL(file);
   });
+}
+
+function blobToDataAttachment(blob, filename) {
+  const file = new File([blob], filename, {
+    type: blob.type || "audio/webm",
+    lastModified: Date.now(),
+  });
+  return fileToDataUrl(file);
+}
+
+function getSupportedRecorderMimeType() {
+  if (typeof MediaRecorder === "undefined" || typeof MediaRecorder.isTypeSupported !== "function") {
+    return "";
+  }
+
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/mp4",
+  ];
+
+  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || "";
+}
+
+function guessRecorderExtension(mimeType) {
+  const lowered = String(mimeType || "").toLowerCase();
+  if (lowered.includes("ogg")) {
+    return "ogg";
+  }
+  if (lowered.includes("mp4")) {
+    return "m4a";
+  }
+  if (lowered.includes("wav")) {
+    return "wav";
+  }
+  return "webm";
+}
+
+function isVoiceCaptureSupported() {
+  return Boolean(
+    typeof window !== "undefined" &&
+    navigator?.mediaDevices?.getUserMedia &&
+    typeof MediaRecorder !== "undefined",
+  );
+}
+
+function formatVoiceDuration(seconds) {
+  const safeSeconds = Math.max(0, Number(seconds) || 0);
+  const mins = Math.floor(safeSeconds / 60);
+  const secs = safeSeconds % 60;
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+function getVoiceModeNote() {
+  if (isRealtimeVoiceSupported()) {
+    return "A conversa ao vivo usa o microfone em tempo real. Se preferires, tambem podes gravar uma nota de voz e receber a resposta falada.";
+  }
+
+  return isVoiceCaptureSupported()
+    ? "Neste dispositivo a conversa ao vivo nao esta disponivel, mas podes gravar uma nota de voz e ouvir a resposta."
+    : "Neste dispositivo podes continuar a anexar ficheiros de audio, mas a gravacao direta no browser nao esta disponivel.";
+}
+
+function autoplayPendingGeneratedAudio() {
+  if (!state.pendingAutoplayAudioId) {
+    return;
+  }
+
+  const audio = document.querySelector(
+    `audio[data-audio-attachment="${CSS.escape(state.pendingAutoplayAudioId)}"]`,
+  );
+  state.pendingAutoplayAudioId = null;
+
+  if (!audio) {
+    return;
+  }
+
+  const playPromise = audio.play();
+  if (playPromise && typeof playPromise.catch === "function") {
+    playPromise.catch(() => {});
+  }
 }
 
 function escapeHtml(value) {

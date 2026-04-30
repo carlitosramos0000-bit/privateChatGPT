@@ -5,8 +5,11 @@
     "defaultModel": "gpt-5.5",
     "codeModel": "gpt-5.5",
     "imageOutputModel": "dall-e-3",
+    "voiceRealtimeModel": "gpt-realtime-mini",
+    "voiceOutputVoice": "coral",
     "systemPrompt": "�?s um assistente útil, rigoroso e profissional. Responde de forma clara, organizada e com foco em ajudar o utilizador.",
     "codeSystemPrompt": "You are a senior software engineer. Produce production-ready code, explain tradeoffs briefly, and when the user supplies a screenshot or image, you can recreate the UI in semantic, accessible, responsive HTML and CSS without unnecessary frameworks unless asked.",
+    "conversionSystemPrompt": "You are in voice conversation mode. Reply in natural European Portuguese (pt-PT), in a conversational and easy-to-listen style. Keep answers clear, practical, and concise enough to sound natural when spoken aloud. Avoid markdown-heavy formatting unless the user explicitly asks for structured output.",
     "imageSystemPrompt": "Generate or edit highly realistic, polished images by default unless the user explicitly asks for another style. Preserve important identity, composition, and product details when editing reference images.",
     "reasoningEffort": "medium",
     "maxOutputTokens": 2200,
@@ -35,7 +38,8 @@
       "title": "Gera uma imagem ultra-realista, muito deta...",
       "responseMemory": {
         "assistant": null,
-        "code": null
+        "code": null,
+        "ptpt": null
       },
       "createdAt": "2026-04-29T10:24:13.430Z",
       "updatedAt": "2026-04-29T10:39:56.825Z"
@@ -46,7 +50,8 @@
       "title": "Gera uma imagem ultra-realista, muito deta...",
       "responseMemory": {
         "assistant": null,
-        "code": null
+        "code": null,
+        "ptpt": null
       },
       "createdAt": "2026-04-29T10:37:59.993Z",
       "updatedAt": "2026-04-29T10:44:04.983Z"
@@ -57,7 +62,8 @@
       "title": "Gera uma imagem ultra-realista, muito deta...",
       "responseMemory": {
         "assistant": null,
-        "code": null
+        "code": null,
+        "ptpt": null
       },
       "createdAt": "2026-04-29T10:45:59.068Z",
       "updatedAt": "2026-04-29T10:47:00.746Z"

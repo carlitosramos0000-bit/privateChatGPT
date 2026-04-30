@@ -24,7 +24,9 @@ const MAX_HISTORY_IMAGE_REFERENCES = 3;
 const BOOTSTRAP_OPENAI_KEY = process.env.BOOTSTRAP_OPENAI_KEY?.trim() || "";
 const ADMIN_USERNAME = "ramoscv";
 const ADMIN_PASSWORD = "Logica!1";
-const MODES = ["assistant", "code", "image"];
+const DEFAULT_REALTIME_MODEL = "gpt-realtime-mini";
+const DEFAULT_REALTIME_VOICE = "coral";
+const MODES = ["assistant", "code", "image", "ptpt"];
 const REQUEST_MODES = ["auto", ...MODES];
 const IMAGE_EDIT_INTENT_PATTERNS = [
   /\bedita(?:r)?\b/,
@@ -44,10 +46,14 @@ const DEFAULT_SETTINGS = {
   defaultModel: "gpt-5.5",
   codeModel: "gpt-5.5",
   imageOutputModel: "dall-e-3",
+  voiceRealtimeModel: DEFAULT_REALTIME_MODEL,
+  voiceOutputVoice: DEFAULT_REALTIME_VOICE,
   systemPrompt:
     "You are a precise, helpful, production-grade assistant. Respond clearly, structure complex answers well, and stay practical.",
   codeSystemPrompt:
     "You are a senior software engineer. Produce production-ready code, explain tradeoffs briefly, and when the user supplies a screenshot or image, you can recreate the UI in semantic, accessible, responsive HTML and CSS without unnecessary frameworks unless asked.",
+  conversionSystemPrompt:
+    "You are in voice conversation mode. Reply in natural European Portuguese (pt-PT), in a conversational and easy-to-listen style. Keep answers clear, practical, and concise enough to sound natural when spoken aloud. Avoid markdown-heavy formatting unless the user explicitly asks for structured output.",
   imageSystemPrompt:
     "Generate or edit highly realistic, polished images by default unless the user explicitly asks for another style. Preserve important identity, composition, and product details when editing reference images.",
   reasoningEffort: "medium",
@@ -225,6 +231,16 @@ function normalizeStateShape(state) {
     changed = true;
   }
 
+  if (!state.settings.voiceRealtimeModel) {
+    mergedSettings.voiceRealtimeModel = DEFAULT_SETTINGS.voiceRealtimeModel;
+    changed = true;
+  }
+
+  if (!state.settings.voiceOutputVoice) {
+    mergedSettings.voiceOutputVoice = DEFAULT_SETTINGS.voiceOutputVoice;
+    changed = true;
+  }
+
   if (!state.settings.imageSize) {
     mergedSettings.imageSize = DEFAULT_SETTINGS.imageSize;
     changed = true;
@@ -240,6 +256,11 @@ function normalizeStateShape(state) {
     changed = true;
   }
 
+  if (!state.settings.conversionSystemPrompt) {
+    mergedSettings.conversionSystemPrompt = DEFAULT_SETTINGS.conversionSystemPrompt;
+    changed = true;
+  }
+
   if (!state.settings.imageSystemPrompt) {
     mergedSettings.imageSystemPrompt = DEFAULT_SETTINGS.imageSystemPrompt;
     changed = true;
@@ -248,6 +269,20 @@ function normalizeStateShape(state) {
   const normalizedImageOutputModel = normalizeImageModelIdentifier(mergedSettings.imageOutputModel);
   if (mergedSettings.imageOutputModel !== normalizedImageOutputModel) {
     mergedSettings.imageOutputModel = normalizedImageOutputModel;
+    changed = true;
+  }
+
+  const normalizedRealtimeModel = normalizeRealtimeModelIdentifier(
+    mergedSettings.voiceRealtimeModel,
+  );
+  if (mergedSettings.voiceRealtimeModel !== normalizedRealtimeModel) {
+    mergedSettings.voiceRealtimeModel = normalizedRealtimeModel;
+    changed = true;
+  }
+
+  const normalizedRealtimeVoice = normalizeRealtimeVoiceName(mergedSettings.voiceOutputVoice);
+  if (mergedSettings.voiceOutputVoice !== normalizedRealtimeVoice) {
+    mergedSettings.voiceOutputVoice = normalizedRealtimeVoice;
     changed = true;
   }
 
@@ -295,6 +330,7 @@ function normalizeStateShape(state) {
     const nextMemory = {
       assistant: currentMemory.assistant || chat.previousResponseId || null,
       code: currentMemory.code || null,
+      ptpt: currentMemory.ptpt || null,
     };
 
     if (JSON.stringify(currentMemory) !== JSON.stringify(nextMemory)) {
@@ -404,6 +440,26 @@ async function handleApi(req, res, url, method) {
     return;
   }
 
+  if (url.pathname === "/api/realtime/session" && method === "POST") {
+    const offerSdp = (await readTextBody(req)).trim();
+    if (!offerSdp) {
+      sendJson(res, 400, { error: "O pedido de voz ao vivo chegou sem SDP." });
+      return;
+    }
+
+    const answerSdp = await requestRealtimeSessionAnswer({
+      user,
+      offerSdp,
+    });
+
+    res.writeHead(200, {
+      "Content-Type": "application/sdp; charset=utf-8",
+      "Cache-Control": "no-store",
+    });
+    res.end(answerSdp);
+    return;
+  }
+
   if (url.pathname === "/api/chats" && method === "GET") {
     sendJson(res, 200, {
       chats: listChatsForUser(user.id),
@@ -422,6 +478,7 @@ async function handleApi(req, res, url, method) {
       responseMemory: {
         assistant: null,
         code: null,
+        ptpt: null,
       },
       createdAt: now,
       updatedAt: now,
@@ -456,11 +513,11 @@ async function handleApi(req, res, url, method) {
 
     const body = await readJsonBody(req);
     const requestedMode = normalizeRequestedMode(body.mode);
-    const text = String(body.text || "").trim();
+    const rawText = String(body.text || "").trim();
     const attachments = Array.isArray(body.attachments) ? body.attachments : [];
-    const mode = resolveEffectiveMode(requestedMode, text, attachments);
+    const mode = resolveEffectiveMode(requestedMode, rawText, attachments);
 
-    if (!text && attachments.length === 0) {
+    if (!rawText && attachments.length === 0) {
       sendJson(res, 400, { error: "Escreve uma mensagem ou adiciona um anexo." });
       return;
     }
@@ -471,6 +528,15 @@ async function handleApi(req, res, url, method) {
       });
       return;
     }
+
+    const text =
+      mode === "ptpt"
+        ? await buildVoiceUserText({
+            apiKey: getOpenAiApiKey(),
+            text: rawText,
+            attachments,
+          })
+        : rawText;
 
     const storedAttachments = await saveIncomingAttachments(chat.id, attachments);
     const now = new Date().toISOString();
@@ -501,6 +567,8 @@ async function handleApi(req, res, url, method) {
       const completion =
         mode === "image"
           ? await requestImageResponse({ user, chat, text, attachments })
+          : mode === "ptpt"
+            ? await requestPtPtVoiceResponse({ user, chat, text, attachments })
           : await requestTextResponse({ user, chat, text, attachments, mode });
 
       assistantMessage = {
@@ -615,10 +683,18 @@ async function handleApi(req, res, url, method) {
       defaultModel: String(body.defaultModel || "").trim() || appState.settings.defaultModel,
       codeModel: String(body.codeModel || "").trim() || appState.settings.codeModel,
       imageOutputModel: nextImageOutputModel,
+      voiceRealtimeModel: normalizeRealtimeModelIdentifier(
+        String(body.voiceRealtimeModel || "").trim() || appState.settings.voiceRealtimeModel,
+      ),
+      voiceOutputVoice: normalizeRealtimeVoiceName(
+        String(body.voiceOutputVoice || "").trim() || appState.settings.voiceOutputVoice,
+      ),
       systemPrompt:
         String(body.systemPrompt || "").trim() || appState.settings.systemPrompt,
       codeSystemPrompt:
         String(body.codeSystemPrompt || "").trim() || appState.settings.codeSystemPrompt,
+      conversionSystemPrompt:
+        String(body.conversionSystemPrompt || "").trim() || appState.settings.conversionSystemPrompt,
       imageSystemPrompt:
         String(body.imageSystemPrompt || "").trim() || appState.settings.imageSystemPrompt,
       reasoningEffort: validateReasoningEffort(body.reasoningEffort),
@@ -847,6 +923,23 @@ async function readJsonBody(req) {
   }
 }
 
+async function readTextBody(req) {
+  const chunks = [];
+  let size = 0;
+
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > MAX_BODY_BYTES) {
+      const error = new Error("O pedido excede o tamanho maximo permitido.");
+      error.statusCode = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 function parseCookies(req) {
   const header = req.headers.cookie || "";
   return header
@@ -985,8 +1078,13 @@ function serializeSettings() {
     defaultModel: appState.settings.defaultModel,
     codeModel: appState.settings.codeModel,
     imageOutputModel: appState.settings.imageOutputModel,
+    voiceRealtimeModel:
+      appState.settings.voiceRealtimeModel || DEFAULT_SETTINGS.voiceRealtimeModel,
+    voiceOutputVoice:
+      appState.settings.voiceOutputVoice || DEFAULT_SETTINGS.voiceOutputVoice,
     systemPrompt: appState.settings.systemPrompt,
     codeSystemPrompt: appState.settings.codeSystemPrompt,
+    conversionSystemPrompt: appState.settings.conversionSystemPrompt,
     imageSystemPrompt: appState.settings.imageSystemPrompt,
     reasoningEffort: appState.settings.reasoningEffort,
     maxOutputTokens: appState.settings.maxOutputTokens,
@@ -1006,6 +1104,10 @@ function serializePublicAppConfig() {
     defaultModel: appState.settings.defaultModel,
     codeModel: appState.settings.codeModel,
     imageOutputModel: appState.settings.imageOutputModel,
+    voiceRealtimeModel:
+      appState.settings.voiceRealtimeModel || DEFAULT_SETTINGS.voiceRealtimeModel,
+    voiceOutputVoice:
+      appState.settings.voiceOutputVoice || DEFAULT_SETTINGS.voiceOutputVoice,
     imageSize: appState.settings.imageSize,
     imageQuality: appState.settings.imageQuality,
   };
@@ -1091,6 +1193,9 @@ function resolveEffectiveMode(requestedMode, text, attachments) {
   const hasImageAttachment = attachments.some((attachment) =>
     String(attachment.type || "").toLowerCase().startsWith("image/"),
   );
+  const hasAudioAttachment = attachments.some((attachment) =>
+    String(attachment.type || "").toLowerCase().startsWith("audio/"),
+  );
 
   const imageIntentPatterns = [
     /gera(?:r)?\s+uma?\s+imagem/,
@@ -1123,12 +1228,28 @@ function resolveEffectiveMode(requestedMode, text, attachments) {
     /\blanding page\b/,
   ];
 
+  const voiceIntentPatterns = [
+    /\bmodo de voz\b/,
+    /\bconversa por voz\b/,
+    /\bquero falar\b/,
+    /\bfala comigo\b/,
+    /\bresponde com voz\b/,
+    /\bpt-pt\b.+\bvoz\b/,
+    /\bportugu[eê]s de portugal\b.+\bvoz\b/,
+    /\bmicrofone\b/,
+    /\bvoice chat\b/,
+  ];
+
   if (hasImageAttachment && codeIntentPatterns.some((pattern) => pattern.test(lowered))) {
     return "code";
   }
 
   if (imageIntentPatterns.some((pattern) => pattern.test(lowered))) {
     return "image";
+  }
+
+  if (hasAudioAttachment || voiceIntentPatterns.some((pattern) => pattern.test(lowered))) {
+    return "ptpt";
   }
 
   if (codeIntentPatterns.some((pattern) => pattern.test(lowered))) {
@@ -1144,6 +1265,8 @@ function modeLabel(mode) {
       return "Codigo";
     case "image":
       return "Imagem";
+    case "ptpt":
+      return "Voz";
     default:
       return "Assistente";
   }
@@ -1158,6 +1281,7 @@ function buildChatTitle(text, mode) {
     assistant: "Conversa assistida",
     code: "Sessao de codigo",
     image: "Projeto visual",
+    ptpt: "Conversa por voz",
   };
   const compact = String(text || "")
     .replace(/\s+/g, " ")
@@ -1212,6 +1336,20 @@ async function saveGeneratedImageAttachment(chatId, { imageBase64, format = "png
   });
 }
 
+async function saveGeneratedAudioAttachment(chatId, { audioBuffer, format = "mp3" }) {
+  if (!audioBuffer?.length) {
+    throw new Error("A OpenAI nao devolveu audio gerado.");
+  }
+
+  const extension = normalizeAudioExtension(format);
+  return writeAttachmentFile(chatId, {
+    buffer: audioBuffer,
+    filename: `generated-voice-${crypto.randomUUID()}.${extension}`,
+    mimeType: audioMimeTypeForExtension(extension),
+    kind: "generated-audio",
+  });
+}
+
 async function writeAttachmentFile(chatId, { buffer, filename, mimeType, kind }) {
   const attachmentId = crypto.randomUUID();
   const relativePath = path.join("uploads", chatId, `${attachmentId}-${filename}`);
@@ -1234,13 +1372,13 @@ function sanitizeFilename(name) {
 }
 
 function decodeDataUrl(dataUrl) {
-  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  const match = dataUrl.match(/^data:([^,]+);base64,(.+)$/);
   if (!match) {
     throw new Error("Formato de anexo nao suportado.");
   }
 
   return {
-    mimeType: match[1],
+    mimeType: String(match[1] || "").split(";")[0],
     buffer: Buffer.from(match[2], "base64"),
   };
 }
@@ -1287,6 +1425,105 @@ async function requestTextResponse({ user, chat, text, attachments, mode }) {
     model: response.model || model,
     usage: response.usage || null,
   };
+}
+
+async function requestPtPtVoiceResponse({ user, chat, text, attachments }) {
+  const nonAudioAttachments = attachments.filter((attachment) =>
+    !String(attachment.type || attachment.mimeType || "").toLowerCase().startsWith("audio/"),
+  );
+
+  const textResponse = await requestTextResponse({
+    user,
+    chat,
+    text,
+    attachments: nonAudioAttachments,
+    mode: "ptpt",
+  });
+
+  const spokenReply = String(textResponse.text || "").trim();
+  if (!spokenReply) {
+    throw new Error("Nao foi possivel gerar a resposta para a conversa por voz.");
+  }
+
+  const audioBuffer = await requestSpeechSynthesis({
+    apiKey: getOpenAiApiKey(),
+    text: spokenReply,
+  });
+
+  const audioAttachment = await saveGeneratedAudioAttachment(chat.id, {
+    audioBuffer,
+    format: PT_PT_VOICE_FORMAT,
+  });
+
+  return {
+    text: spokenReply,
+    attachments: [audioAttachment],
+    responseId: textResponse.responseId,
+    model: `${textResponse.model || selectModelForMode("ptpt")} + ${PT_PT_VOICE_MODEL}`,
+    usage: textResponse.usage || null,
+  };
+}
+
+async function buildVoiceUserText({ apiKey, text, attachments }) {
+  const audioAttachments = attachments.filter((attachment) =>
+    String(attachment.type || attachment.mimeType || "").toLowerCase().startsWith("audio/"),
+  );
+
+  const transcripts = [];
+  for (const attachment of audioAttachments) {
+    transcripts.push(await transcribeAudioAttachment({ apiKey, attachment }));
+  }
+
+  const mergedTranscript = transcripts
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean)
+    .join("\n\n");
+
+  if (mergedTranscript && text) {
+    return `Mensagem falada do utilizador:\n${mergedTranscript}\n\nNota adicional escrita:\n${text}`;
+  }
+
+  if (mergedTranscript) {
+    return mergedTranscript;
+  }
+
+  if (audioAttachments.length > 0) {
+    throw new Error("Nao foi possivel transcrever o audio enviado.");
+  }
+
+  return text;
+}
+
+async function transcribeAudioAttachment({ apiKey, attachment }) {
+  const mimeType = String(attachment.type || attachment.mimeType || "audio/webm").toLowerCase();
+  const dataUrl = String(attachment.dataUrl || "");
+  if (!dataUrl) {
+    return "";
+  }
+
+  const { buffer } = decodeDataUrl(dataUrl);
+  if (!buffer.length) {
+    return "";
+  }
+
+  const filename = sanitizeFilename(
+    String(attachment.name || `voice-note.${guessAudioExtensionFromMimeType(mimeType)}`),
+  );
+
+  const form = new FormData();
+  form.append("model", "gpt-4o-mini-transcribe");
+  form.append("response_format", "json");
+  form.append("prompt", "The speaker may use European Portuguese from Portugal.");
+  const blob = new Blob([buffer], { type: mimeType });
+  form.append("file", blob, filename);
+
+  const response = await callOpenAiMultipart({
+    apiKey,
+    endpoint: "https://api.openai.com/v1/audio/transcriptions",
+    body: form,
+  });
+
+  return String(response?.text || "").trim();
 }
 
 function buildTextInputContent(text, attachments, mode) {
@@ -1341,6 +1578,10 @@ function buildFallbackPrompt(mode, attachments) {
       : "Cria uma imagem ultra-realista, detalhada e visualmente forte a partir deste pedido.";
   }
 
+  if (mode === "ptpt") {
+    return "Responde a este pedido como numa conversa por voz, em portugues de Portugal, com frases naturais e prontas a ouvir.";
+  }
+
   return "Analisa os anexos enviados e ajuda o utilizador da forma mais pratica possivel.";
 }
 
@@ -1356,7 +1597,121 @@ function buildInstructionsForMode(mode) {
     return `${basePrompt}\n\n${codePrompt}\n\nAssistant name: ${assistantName}.\nDefault language for responses: European Portuguese unless the user requests another language.`;
   }
 
+  if (mode === "ptpt") {
+    const conversionPrompt =
+      appState.settings.conversionSystemPrompt || DEFAULT_SETTINGS.conversionSystemPrompt;
+    return `${basePrompt}\n\n${conversionPrompt}\n\nAssistant name: ${assistantName}.\nAlways produce the final answer in European Portuguese (pt-PT), with short to medium spoken-style sentences suitable for voice conversation.`;
+  }
+
   return `${basePrompt}\n\nAssistant name: ${assistantName}.\nDefault language for responses: European Portuguese unless the user requests another language.`;
+}
+
+function buildRealtimeVoiceInstructions() {
+  const basePrompt = appState.settings.systemPrompt || DEFAULT_SETTINGS.systemPrompt;
+  const voicePrompt =
+    appState.settings.conversionSystemPrompt || DEFAULT_SETTINGS.conversionSystemPrompt;
+  const assistantName =
+    appState.settings.assistantName || DEFAULT_SETTINGS.assistantName;
+
+  return `${basePrompt}\n\n${voicePrompt}\n\nAssistant name: ${assistantName}.\nSpeak naturally in European Portuguese (pt-PT). Keep responses warm, concise, easy to follow, and suitable for live spoken conversation. Ask a short follow-up only when needed to continue the voice conversation naturally.`;
+}
+
+async function requestRealtimeSessionAnswer({ user, offerSdp }) {
+  const apiKey = getOpenAiApiKey();
+  const sessionConfigs = [
+    buildRealtimeSessionConfig(user),
+    buildRealtimeSessionCompatConfig(),
+  ];
+  let lastError = null;
+
+  for (const sessionConfig of sessionConfigs) {
+    const form = new FormData();
+    form.set("sdp", offerSdp);
+    form.set("session", JSON.stringify(sessionConfig));
+
+    try {
+      return await callOpenAiText({
+        apiKey,
+        endpoint: "https://api.openai.com/v1/realtime/calls",
+        body: form,
+      });
+    } catch (error) {
+      lastError = error;
+      if (!shouldRetryRealtimeSessionConfig(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error("Nao foi possivel iniciar a sessao Realtime.");
+}
+
+function buildRealtimeSessionConfig(user) {
+  return {
+    type: "realtime",
+    model:
+      normalizeRealtimeModelIdentifier(
+        appState.settings.voiceRealtimeModel || DEFAULT_SETTINGS.voiceRealtimeModel,
+      ),
+    instructions: buildRealtimeVoiceInstructions(),
+    audio: {
+      input: {
+        noise_reduction: {
+          type: "near_field",
+        },
+        transcription: {
+          model: "gpt-4o-mini-transcribe",
+          language: "pt",
+          prompt: "The speaker uses European Portuguese from Portugal.",
+        },
+      },
+      output: {
+        voice: normalizeRealtimeVoiceName(
+          appState.settings.voiceOutputVoice || DEFAULT_SETTINGS.voiceOutputVoice,
+        ),
+      },
+    },
+    turn_detection: {
+      type: "server_vad",
+      create_response: true,
+      interrupt_response: true,
+      prefix_padding_ms: 250,
+      silence_duration_ms: 650,
+      threshold: 0.45,
+    },
+    output_modalities: ["audio"],
+    max_output_tokens: Math.max(
+      256,
+      Math.min(2048, Number(appState.settings.maxOutputTokens || 1200)),
+    ),
+    metadata: {
+      local_user: user.username,
+      surface: "private-chatgpt-pro-live-voice",
+    },
+  };
+}
+
+function buildRealtimeSessionCompatConfig() {
+  return {
+    type: "realtime",
+    model:
+      normalizeRealtimeModelIdentifier(
+        appState.settings.voiceRealtimeModel || DEFAULT_SETTINGS.voiceRealtimeModel,
+      ),
+    instructions: buildRealtimeVoiceInstructions(),
+    audio: {
+      output: {
+        voice: normalizeRealtimeVoiceName(
+          appState.settings.voiceOutputVoice || DEFAULT_SETTINGS.voiceOutputVoice,
+        ),
+      },
+    },
+  };
+}
+
+function shouldRetryRealtimeSessionConfig(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("unknown parameter") || message.includes("unexpected");
 }
 
 async function requestImageResponse({ chat, text, attachments }) {
@@ -1618,6 +1973,10 @@ function selectModelForMode(mode) {
   return appState.settings.defaultModel || DEFAULT_SETTINGS.defaultModel;
 }
 
+const PT_PT_VOICE_MODEL = "gpt-4o-mini-tts";
+const PT_PT_VOICE_NAME = "coral";
+const PT_PT_VOICE_FORMAT = "mp3";
+
 function supportsReasoning(model) {
   return (
     typeof model === "string" &&
@@ -1681,6 +2040,87 @@ async function callOpenAiMultipart({ apiKey, endpoint, body }) {
   }
 
   return data;
+}
+
+async function callOpenAiText({ apiKey, endpoint, body }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 180000);
+
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    throw normalizeOpenAiTransportError(error);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") || "";
+    const errorPayload = contentType.includes("application/json")
+      ? await response.json().catch(() => ({}))
+      : { message: await response.text().catch(() => "") };
+    throw new Error(extractOpenAiError(errorPayload, "A API Realtime da OpenAI devolveu um erro."));
+  }
+
+  return response.text();
+}
+
+async function requestSpeechSynthesis({ apiKey, text }) {
+  const safeText = String(text || "").trim().slice(0, 3900);
+  const payload = {
+    model: PT_PT_VOICE_MODEL,
+    voice: PT_PT_VOICE_NAME,
+    input: safeText,
+    instructions:
+      "Speak in clear European Portuguese from Portugal, with natural pronunciation, steady pacing, and a polished but human tone. This voice is AI-generated.",
+    response_format: PT_PT_VOICE_FORMAT,
+  };
+
+  return callOpenAiBinary({
+    apiKey,
+    endpoint: "https://api.openai.com/v1/audio/speech",
+    payload,
+  });
+}
+
+async function callOpenAiBinary({ apiKey, endpoint, payload }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 180000);
+
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    throw normalizeOpenAiTransportError(error);
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") || "";
+    const errorPayload = contentType.includes("application/json")
+      ? await response.json().catch(() => ({}))
+      : { message: await response.text().catch(() => "") };
+    throw new Error(extractOpenAiError(errorPayload, "A API de audio da OpenAI devolveu um erro."));
+  }
+
+  return Buffer.from(await response.arrayBuffer());
 }
 
 async function callOpenAiImageJsonWithFallback({ apiKey, endpoint, payload }) {
@@ -1899,6 +2339,15 @@ function normalizeImageQualityForModel(value, model) {
     : config.defaultQuality;
 }
 
+function normalizeRealtimeModelIdentifier(value) {
+  return String(value || "").trim() || DEFAULT_REALTIME_MODEL;
+}
+
+function normalizeRealtimeVoiceName(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized || DEFAULT_REALTIME_VOICE;
+}
+
 function shouldSendImageQuality(model, quality) {
   const family = getImageModelFamily(model);
   if (!quality) {
@@ -1918,6 +2367,56 @@ function normalizeImageExtension(format) {
     return lower === "jpeg" ? "jpg" : lower;
   }
   return "png";
+}
+
+function normalizeAudioExtension(format) {
+  const lower = String(format || "mp3").toLowerCase();
+  if (["mp3", "wav", "opus", "aac", "flac", "pcm"].includes(lower)) {
+    return lower;
+  }
+  return "mp3";
+}
+
+function audioMimeTypeForExtension(extension) {
+  switch (extension) {
+    case "wav":
+      return "audio/wav";
+    case "opus":
+      return "audio/opus";
+    case "aac":
+      return "audio/aac";
+    case "flac":
+      return "audio/flac";
+    case "pcm":
+      return "audio/pcm";
+    default:
+      return "audio/mpeg";
+  }
+}
+
+function guessAudioExtensionFromMimeType(mimeType) {
+  const lowered = String(mimeType || "").toLowerCase();
+
+  if (lowered.includes("webm")) {
+      return "webm";
+  }
+  if (lowered.includes("ogg")) {
+      return "ogg";
+  }
+  if (lowered.includes("mp4") || lowered.includes("m4a")) {
+      return "m4a";
+  }
+  if (lowered.includes("wav")) {
+      return "wav";
+  }
+  if (lowered.includes("aac")) {
+      return "aac";
+  }
+  if (lowered.includes("flac")) {
+      return "flac";
+  }
+
+  return "mp3";
 }
 
 function getOpenAiApiKey() {
